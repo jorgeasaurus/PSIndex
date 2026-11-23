@@ -1,0 +1,7 @@
+# data/ is generated from Microsoft's public PowerShell documentation by pipelines/.
+# Its code examples contain sample values (Contoso passwords, placeholder JWT/pkcs12
+# strings) that secret scanners report as secrets. Everything else stays scanned.
+version: 2
+secret:
+  ignored_paths:
+    - "data/**"
