@@ -99,7 +99,7 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
   const [showCommon, setShowCommon] = useState(false);
   const visible = showCommon ? params : params.filter((p) => !isCommonParam(p.name));
   const hidden = params.length - visible.length;
-  const examples = c.examples.filter((x) => x.trim());
+  const examples = c.examples;
   const perms = c.permissions;
   return (
     <>

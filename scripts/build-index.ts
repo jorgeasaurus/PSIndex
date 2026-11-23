@@ -20,15 +20,13 @@ interface SourceDef extends Pick<SourceMeta, 'id' | 'label' | 'short' | 'color' 
   extra: { label: string; field: string; warn?: string } | null;
   /** For a pipeline whose rows carry no module (MECM is one module), the module of every row. */
   module?: string;
-  /** Whether the manifest records a permission count per cmdlet (`p`). */
-  perms?: true;
 }
 
 // Every per-source fact lives here.
 const SOURCES: SourceDef[] = [
-  { id: 'graph', label: 'Microsoft Graph', short: 'Graph', color: '#9b8cff', sample: 'Get-MgUser', perms: true, extra: { label: 'API', field: 'a', warn: 'beta' } },
+  { id: 'graph', label: 'Microsoft Graph', short: 'Graph', color: '#9b8cff', sample: 'Get-MgUser', extra: { label: 'API', field: 'a', warn: 'beta' } },
   { id: 'az', label: 'Azure (Az)', short: 'Az', color: '#4cb3ff', sample: 'Get-AzVM', extra: null },
-  { id: 'entra', label: 'Microsoft Entra', short: 'Entra', color: '#2fd0b5', sample: 'Get-EntraGroupMember', perms: true, extra: { label: 'API', field: 'a', warn: 'beta' } },
+  { id: 'entra', label: 'Microsoft Entra', short: 'Entra', color: '#2fd0b5', sample: 'Get-EntraGroupMember', extra: { label: 'API', field: 'a', warn: 'beta' } },
   { id: 'exchange', label: 'Exchange, Teams & SharePoint', short: 'Exchange', color: '#f2b33d', sample: 'Set-Mailbox', extra: null },
   { id: 'mecm', label: 'Configuration Manager', short: 'MECM', color: '#7fd45a', sample: 'Invoke-CMClientAction', module: 'ConfigurationManager', extra: { label: 'Site role', field: 'r' } },
 ];
@@ -64,7 +62,7 @@ function normalizeCmdlet(where: string, raw: unknown, description: string): Cmdl
   if (c.parameters !== undefined && !params(c.parameters)) throw new Error(`${where}: parameters are not {name, type, required, description?}`);
   return {
     syntax: c.syntax,
-    examples: c.examples,
+    examples: c.examples.filter((x) => x.trim()), // pipelines can leave blank example blocks
     permissions: c.permissions ?? [], // only Graph and Entra document permissions
     // Only MECM documents parameters separately.
     parameters: (c.parameters ?? []).map((p): DocumentedParam => ({ ...p, description: p.description ?? '' })),
@@ -73,27 +71,29 @@ function normalizeCmdlet(where: string, raw: unknown, description: string): Cmdl
 }
 
 /**
- * One manifest row, checked: the fields every source writes, the source's own extra facet and
- * permission count, and the module (and its file) the row resolves to.
+ * One manifest row, checked: the fields every source writes, the source's own extra facet, and
+ * the module and module file the row resolves to. "Has examples" and the permission count are
+ * read off that file's normalized entry, so the index and the detail pane cannot disagree.
  */
-function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, string[]>, descriptions: Record<string, string>): Row {
+function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, Map<string, CmdletDetail>>, descriptions: Record<string, string>): Row {
   if (typeof raw !== 'object' || raw === null) throw new Error(`${src.id} manifest: a row is not an object`);
   const r = raw as Record<string, unknown>; // an object; each field is checked below
   const name = typeof r.n === 'string' ? r.n : '';
   const fail = (what: string): never => { throw new Error(`${src.id} manifest, ${name || JSON.stringify(raw)}: ${what}`); };
   const str = (k: string) => { const v = r[k]; return typeof v === 'string' ? v : fail(`${k} is not a string`); };
   if (!name) fail('n (name) is not a string');
-  const e = r.e;
-  if (typeof e !== 'boolean') return fail('e (has examples) is not a boolean');
   const m = r.m === undefined && src.module ? src.module : str('m');
   if (!m) fail('no module');
-  const files = (holders.get(name) ?? []).sort();
+  const held = holders.get(name) ?? new Map<string, CmdletDetail>();
+  const files = [...held.keys()].sort();
   if (!files.length) fail('no module file');
+  const f = files.includes(m) ? m : files[0]; // prefer the file named after the row's own module
+  const detail = held.get(f)!;
   return {
-    n: name, v: str('v'), c: str('c'), e, m,
-    p: !src.perms ? 0 : typeof r.p === 'number' ? r.p : fail('p (permission count) is not a number'),
+    n: name, v: str('v'), c: str('c'), m, f,
+    e: detail.examples.length > 0,
+    p: detail.permissions.length,
     x: src.extra ? str(src.extra.field) : '',
-    f: files.includes(m) ? m : files[0], // prefer the file named after the row's own module
     desc: descriptions[name] ?? '',
   };
 }
@@ -104,15 +104,17 @@ async function loadRows(src: SourceDef, out: string): Promise<{ version: string;
   const manifest = await readJson<Manifest>(join(dir, 'manifest.json'));
   const descriptions = await readJson<Record<string, string>>(join(dir, 'descriptions.json'));
   // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
-  const holders = new Map<string, string[]>();
+  const holders = new Map<string, Map<string, CmdletDetail>>(); // name -> module file -> entry
   for (const f of (await readdir(join(dir, 'modules'))).filter((f) => f.endsWith('.json'))) {
     const stem = basename(f, '.json');
     const raw = await readJson<RawModuleFile>(join(dir, 'modules', f));
     if (typeof raw.cmdlets !== 'object' || raw.cmdlets === null) throw new Error(`${src.id}/${f}: cmdlets is not an object`);
     const file: CmdletFile = {};
     for (const [name, c] of Object.entries(raw.cmdlets)) {
-      holders.set(name, [...(holders.get(name) ?? []), stem]);
-      file[name] = normalizeCmdlet(`${src.id}/${f} ${name}`, c, descriptions[name] ?? '');
+      const detail = normalizeCmdlet(`${src.id}/${f} ${name}`, c, descriptions[name] ?? '');
+      file[name] = detail;
+      if (!holders.has(name)) holders.set(name, new Map());
+      holders.get(name)!.set(stem, detail);
     }
     await writeFile(join(out, f), JSON.stringify(file));
   }
