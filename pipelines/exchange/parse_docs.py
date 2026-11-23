@@ -81,6 +81,25 @@ def fetch_gallery_version(package_name):
         return ''
 
 
+def previous_versions(data_dir):
+    """Versions recorded by the last successful run, used when the Gallery lookup fails."""
+    prev = {}
+    mod_dir = Path(data_dir) / "modules"
+    if mod_dir.is_dir():
+        for f in mod_dir.glob("*.json"):
+            try:
+                ver = json.loads(f.read_text(encoding="utf-8")).get("version")
+            except (OSError, ValueError):
+                continue
+            if ver:
+                prev[f.stem] = ver
+    try:
+        prev["__manifest__"] = json.loads((Path(data_dir) / "manifest.json").read_text(encoding="utf-8")).get("v")
+    except (OSError, ValueError):
+        pass
+    return prev
+
+
 def fetch_module_versions():
     """Fetch latest stable versions for all known modules from PowerShell Gallery."""
     versions = {}
@@ -199,7 +218,12 @@ def main():
 
     print("Fetching module versions from PowerShell Gallery...")
     module_versions = fetch_module_versions()
-    primary_version = module_versions.get('ExchangePowerShell', '0.0.0')
+    prev = previous_versions(out_dir)
+    for mod, ver in prev.items():
+        if mod != '__manifest__' and not module_versions.get(mod):
+            module_versions[mod] = ver
+            print(f"  {mod}: Gallery lookup failed; kept previous version {ver}")
+    primary_version = module_versions.get('ExchangePowerShell') or prev.get('__manifest__') or '0.0.0'
 
     manifest_entries = []
     descriptions = {}
