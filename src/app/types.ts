@@ -27,6 +27,7 @@ export interface IndexShard {
   mods: string[];
   cats: string[];
   files: string[];
+  fileVersions: string[]; // aligned with files: that module's version, '' when unknown
   extras: string[];
 }
 
@@ -67,6 +68,7 @@ export interface Row {
   category: string;
   extra: string;
   file: string;
+  moduleVersion: string; // '' when unknown
   perms: number;
   examples: boolean;
   desc: string;

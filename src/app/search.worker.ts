@@ -177,6 +177,7 @@ function rowOf(all: Loaded[], ref: number): Row {
     category: s.cats[s.c[i]],
     extra: s.extras[s.x[i]],
     file: s.files[s.f[i]],
+    moduleVersion: s.fileVersions[s.f[i]],
     perms: s.p[i],
     examples: !!s.e[i],
     desc: L.desc?.[i] ?? '',

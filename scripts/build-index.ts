@@ -114,7 +114,7 @@ async function emit(path: string, text: string) {
 }
 
 /** Write a source's normalized module files and return its rows, sorted by name. */
-async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[] }> {
+async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[]; fileVersions: Map<string, string> }> {
   const dir = join(DATA, src.id);
   const manifest = await readJson(join(dir, 'manifest.json'));
   if (!isObject(manifest)) throw new Error(`${src.id} manifest: not an object`);
@@ -122,10 +122,14 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[] 
   if (!isStringRecord(descriptions)) throw new Error(`${src.id} descriptions: not an object of strings`);
   // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
   const holders = new Map<string, Map<string, CmdletDetail>>(); // name -> module file -> entry
+  const fileVersions = new Map<string, string>(); // module file -> its module's version ('' when unknown)
   for (const f of (await readdir(join(dir, 'modules'))).filter((f) => f.endsWith('.json')).sort()) {
     const stem = basename(f, '.json');
     const raw = await readJson(join(dir, 'modules', f));
     if (!isObject(raw) || !isObject(raw.cmdlets)) throw new Error(`${src.id}/${f}: cmdlets is not an object`);
+    // A failed version lookup leaves it null or ''; MECM's files are per category and have none.
+    if (raw.version !== undefined && raw.version !== null && typeof raw.version !== 'string') throw new Error(`${src.id}/${f}: version is not a string`);
+    fileVersions.set(stem, raw.version ?? '');
     const file: CmdletFile = {};
     for (const [name, c] of Object.entries(raw.cmdlets)) {
       const detail = normalizeCmdlet(`${src.id}/${f} ${name}`, c, descriptions[name] ?? '');
@@ -140,7 +144,7 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[] 
   // pipelines/common.py source_version guarantees a version; anything else is a broken manifest.
   if (typeof version !== 'string' || !version) throw new Error(`${src.id} manifest: v is not a version string`);
   const rows = manifest.d.map((r) => parseManifestRow(src, r, holders, descriptions));
-  return { version, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
+  return { version, rows: rows.sort((a, b) => a.n.localeCompare(b.n)), fileVersions };
 }
 
 function interner() {
@@ -157,9 +161,9 @@ function interner() {
 }
 
 /** Rows (already in display order) -> the columnar shard plus the aligned description array. */
-function buildShard(rows: Row[]): { index: IndexShard; desc: string[] } {
+function buildShard(rows: Row[], fileVersions: Map<string, string>): { index: IndexShard; desc: string[] } {
   const verbs = interner(), mods = interner(), cats = interner(), files = interner(), extras = interner();
-  const index: IndexShard = { n: [], v: [], m: [], c: [], f: [], x: [], p: [], e: [], verbs: verbs.list, mods: mods.list, cats: cats.list, files: files.list, extras: extras.list };
+  const index: IndexShard = { n: [], v: [], m: [], c: [], f: [], x: [], p: [], e: [], verbs: verbs.list, mods: mods.list, cats: cats.list, files: files.list, fileVersions: [], extras: extras.list };
   for (const r of rows) {
     index.n.push(r.n);
     index.v.push(verbs.id(r.v));
@@ -170,6 +174,7 @@ function buildShard(rows: Row[]): { index: IndexShard; desc: string[] } {
     index.p.push(r.p);
     index.e.push(r.e ? 1 : 0);
   }
+  index.fileVersions = files.list.map((f) => fileVersions.get(f) ?? '');
   return { index, desc: rows.map((r) => clip(r.desc)) };
 }
 
@@ -194,8 +199,8 @@ async function main() {
   await rm(OUT, { recursive: true, force: true });
   const sources: SourceMeta[] = [];
   for (const src of SOURCES) {
-    const { version, rows } = await loadRows(src);
-    const { index, desc } = buildShard(rows);
+    const { version, rows, fileVersions } = await loadRows(src);
+    const { index, desc } = buildShard(rows, fileVersions);
     await emit(artifactPath.shard(src.id), JSON.stringify(index));
     await emit(artifactPath.desc(src.id), JSON.stringify(desc));
     const { id, label, short, color, sample } = src;

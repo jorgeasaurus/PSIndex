@@ -6,7 +6,7 @@ import { CopyIconButton, CopyTextButton } from './copy';
 import { isCommonParam, parseSyntax, tokenize, withDocumented } from './powershell';
 import { isWarnExtra, sourceOf, srcStyle } from './sources';
 import { entryUrl } from './url';
-import type { CmdletDetail, CmdletFile, Row } from './types';
+import type { CmdletDetail, CmdletFile, Row, SourceMeta } from './types';
 
 interface Props {
   row: Row;
@@ -36,6 +36,7 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
         <div class="tags">
           <span class="tag tag-source"><span class="source-dot" aria-hidden="true" />{src.short}</span>
           <span class="tag">{row.module}</span>
+          {showsModuleVersion(row, src) && <span class="tag" title="Module version">v{row.moduleVersion}</span>}
           {row.verb && <span class="tag">{row.verb}</span>}
           {showsCategory(row) && <span class="tag">{row.category}</span>}
           {row.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{row.extra}</span>}
@@ -172,6 +173,9 @@ function CodeFrame({ copy, syntax, children }: { copy: string; syntax?: boolean;
 
 /** A category tag adds nothing when it repeats the module ("Groups" for Microsoft.Graph.Groups). */
 const showsCategory = (row: Row) => !!row.category && row.category !== row.module && !row.module.endsWith('.' + row.category);
+
+/** A module's own version, when it says more than its source's (Teams 8.1.0 under Exchange 3.9.2; each Az.* module). */
+const showsModuleVersion = (row: Row, src: SourceMeta) => !!row.moduleVersion && row.moduleVersion !== src.version;
 
 const learnUrl = (row: Row) => `https://learn.microsoft.com/powershell/module/${row.module.toLowerCase()}/${row.name.toLowerCase()}`;
 

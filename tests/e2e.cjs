@@ -210,6 +210,20 @@ const scenarios = [
     },
   },
   {
+    name: 'module versions',
+    async run(p) {
+      const versionTags = () => p.$$eval('.detail .tags .tag[title="Module version"]', (t) => t.map((x) => x.textContent));
+      await p.goto(`${BASE}/?c=exchange:Get-CsExternalAccessPolicy@MicrosoftTeams`);
+      await p.waitForSelector('.detail .code');
+      const teams = await versionTags();
+      await p.goto(`${BASE}/?c=exchange:Set-Mailbox`);
+      await p.waitForSelector('.detail .code');
+      const exo = await versionTags();
+      // Teams has its own version under Exchange's; an ExchangePowerShell cmdlet's is the source's, so no tag.
+      check(teams.length === 1 && /^v\d/.test(teams[0]) && exo.length === 0, 'a module version shows only where it differs from its source', `${teams} / ${exo}`);
+    },
+  },
+  {
     name: 'legacy link',
     async run(p) {
       await p.goto(`${BASE}/?s=entra&q=Connect-Entra&c=entra:Connect-Entra`);
