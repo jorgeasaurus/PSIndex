@@ -5,4 +5,4 @@ cd "$(dirname "$0")/../.."
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 git clone --depth 1 --filter=blob:none --sparse https://github.com/MicrosoftDocs/azure-docs-powershell.git "$work/docs"
 git -C "$work/docs" sparse-checkout set --no-cone 'azps-*/Az.*'
-python3 pipelines/az/parse_docs.py "$work/docs"
+PYTHONPATH=pipelines python3 pipelines/az/parse_docs.py "$work/docs"

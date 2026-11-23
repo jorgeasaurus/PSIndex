@@ -1,11 +1,11 @@
+import type { Theme } from './theme';
+
 // Animated ASCII density field drawn on a fixed canvas behind the UI.
 // Glyphs are pre-rendered into an atlas (one per ramp step) and blitted with drawImage,
 // which keeps a full-HD frame to a few ms. Pauses when hidden; one static frame under reduced motion.
 
 const RAMP = ' .·:-=+*%#@';
 const SIGILS = '$|{}<>;'; // PowerShell punctuation sprinkled into the densest cells
-
-export type Theme = 'light' | 'dark';
 
 interface Ripple { x: number; y: number; t0: number; amp: number }
 

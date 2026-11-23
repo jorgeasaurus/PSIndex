@@ -5,4 +5,4 @@ cd "$(dirname "$0")/../.."
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 git clone --depth 1 --filter=blob:none --sparse https://github.com/MicrosoftDocs/entra-powershell-docs.git "$work/docs"
 git -C "$work/docs" sparse-checkout set docs/reference/v1.0 docs/reference/beta
-python3 pipelines/entra/parse_docs.py "$work/docs/docs/reference"
+PYTHONPATH=pipelines python3 pipelines/entra/parse_docs.py "$work/docs/docs/reference"

@@ -19,8 +19,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import keep_previous_versions  # noqa: E402
+from common import keep_previous_versions, source_dir
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -194,9 +193,7 @@ def main():
         sys.exit(1)
 
     docs_root = Path(sys.argv[1])
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent
-    out_dir = repo_root.parent / 'data' / 'exchange'
+    out_dir = source_dir('exchange')
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 

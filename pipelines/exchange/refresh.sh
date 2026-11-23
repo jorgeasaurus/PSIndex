@@ -4,4 +4,4 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 git clone --depth 1 https://github.com/MicrosoftDocs/office-docs-powershell.git "$work/docs"
-python3 pipelines/exchange/parse_docs.py "$work/docs"
+PYTHONPATH=pipelines python3 pipelines/exchange/parse_docs.py "$work/docs"

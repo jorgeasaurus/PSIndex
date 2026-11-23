@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ArrowLeft, ExternalLink, Link2 } from 'lucide-preact';
 import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
-import { isCommonParam, parseParams, tokenize, type Param } from './powershell';
+import { isCommonParam, parseSyntax, tokenize, withDocumented } from './powershell';
 import { isWarnExtra, sourceOf, srcStyle } from './sources';
 import type { CmdletDetail, CmdletFile, Row, SourceMeta } from './types';
 
@@ -96,23 +96,11 @@ function CmdletEntry({ row }: { row: Row }) {
   }
 }
 
-/** Pipelines that document parameters (MECM) win; otherwise parameters are parsed from the syntax. */
-function paramsOf(c: CmdletDetail): Param[] {
-  const parsed = parseParams(c.syntax ?? '');
-  if (!c.parameters?.length) return parsed;
-  const byName = new Map(parsed.map((p) => [p.name, p]));
-  return c.parameters.map((p) => ({
-    name: p.name,
-    type: p.type || byName.get(p.name)?.type || '',
-    required: p.required,
-    positional: byName.get(p.name)?.positional ?? false,
-    description: p.description,
-  }));
-}
-
 function CmdletBody({ c, row }: { c: CmdletDetail; row: Row }) {
-  const sets = useMemo(() => (c.syntax ?? '').split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean), [c]);
-  const params = useMemo(() => paramsOf(c), [c]);
+  const { sets, params } = useMemo(() => {
+    const syntax = parseSyntax(c.syntax ?? '');
+    return { sets: syntax.sets, params: withDocumented(syntax.params, c.parameters) };
+  }, [c]);
   const [showCommon, setShowCommon] = useState(false);
   const visible = showCommon ? params : params.filter((p) => !isCommonParam(p.name));
   const hidden = params.length - visible.length;
@@ -127,7 +115,7 @@ function CmdletBody({ c, row }: { c: CmdletDetail; row: Row }) {
       {sets.length > 0 && (
         <section class="block">
           <h3>Syntax{sets.length > 1 ? <span class="h-note"> · {sets.length} parameter sets</span> : null}</h3>
-          {sets.map((s, i) => <SyntaxBlock key={i} src={s} />)}
+          {sets.map((groups, i) => <SyntaxBlock key={i} groups={groups} />)}
         </section>
       )}
 
@@ -167,25 +155,10 @@ function CmdletBody({ c, row }: { c: CmdletDetail; row: Row }) {
 
 const renderTokens = (s: string) => tokenize(s).map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>));
 
-/**
- * A syntax set as one wrapping line where each top-level group ("Cmd", "[-Name <Type>]") is a
- * non-wrapping unit, so lines only break between parameters.
- */
-function syntaxGroups(s: string): string[] {
-  const groups: string[] = [];
-  let depth = 0, cur = '';
-  for (const ch of s.replace(/\s+/g, ' ').trim()) {
-    if (ch === ' ' && depth === 0) { groups.push(cur); cur = ''; continue; }
-    if (ch === '[') depth++;
-    if (ch === ']') depth = Math.max(0, depth - 1);
-    cur += ch;
-  }
-  return cur ? [...groups, cur] : groups;
-}
-
-function SyntaxBlock({ src }: { src: string }) {
-  const body = useMemo(() => syntaxGroups(src).flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderTokens(g)}</span>]), [src]);
-  return <CodeFrame copy={src} syntax>{body}</CodeFrame>;
+/** One parameter set: each top-level group is a non-wrapping unit, so lines only break between parameters. */
+function SyntaxBlock({ groups }: { groups: string[] }) {
+  const body = useMemo(() => groups.flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderTokens(g)}</span>]), [groups]);
+  return <CodeFrame copy={groups.join(' ')} syntax>{body}</CodeFrame>;
 }
 
 function CodeBlock({ src }: { src: string }) {

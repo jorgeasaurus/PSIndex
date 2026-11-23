@@ -6,8 +6,8 @@ export interface SourceMeta {
   label: string;
   short: string;
   color: string;
-  extraLabel: string; // name of the shard's `x` facet for this source ('' = no such facet)
-  extraWarn: string; // `x` value shown as a caution, e.g. 'beta' ('' = none)
+  /** The shard's `x` facet for this source: its label and an optional value shown as a caution ("beta"). */
+  extra: { label: string; warn?: string } | null;
   learn: string; // Microsoft Learn URL template with {module} / {name}, or '' for none
   sample: string; // example search shown on the intro panel
   count: number;

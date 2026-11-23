@@ -14,18 +14,17 @@ interface Props {
   setActive: (i: number) => void;
   openKey: string;
   onOpen: (r: Row) => void;
-  descTick: number;
   query: string;
   empty: ComponentChildren;
   failed?: ComponentChildren;
 }
 
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ client, refs, active, setActive, openKey, onOpen, descTick, query, empty, failed }: Props) {
+export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, empty, failed }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
-  const cache = useRef(new Map<number, Row>());
+  const [rowsVersion, setRowsVersion] = useState(0); // bumps when the client's cached rows go stale
 
   // New result set: jump to top, drop cache.
   useLayoutEffect(() => {
@@ -33,7 +32,7 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, d
     measure();
   }, [refs]);
 
-  useEffect(() => { cache.current.clear(); setRows(new Map()); }, [descTick]);
+  useEffect(() => client.onRowsChanged(() => setRowsVersion((v) => v + 1)), [client]);
 
   const measure = () => {
     const el = scroller.current;
@@ -54,28 +53,11 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, d
   // Materialise the visible window.
   useEffect(() => {
     if (!refs) return;
-    const want: number[] = [];
-    const end = Math.min(refs.length, range.end);
-    for (let i = range.start; i < end; i++) if (!cache.current.has(refs[i])) want.push(refs[i]);
-    const publish = () => {
-      const m = new Map<number, Row>();
-      for (let i = range.start; i < end; i++) {
-        const r = cache.current.get(refs[i]);
-        if (r) m.set(refs[i], r);
-      }
-      setRows(m);
-    };
-    if (!want.length) return publish();
+    const window = Array.from(refs.subarray(range.start, Math.min(refs.length, range.end)));
     let live = true;
-    client.request('rows', { refs: want }).then((got) => {
-      if (!live) return;
-      // Evict before inserting, so the rows about to be shown are never the ones dropped.
-      if (cache.current.size + got.length > 4000) cache.current.clear();
-      got.forEach((r, k) => cache.current.set(want[k], r));
-      publish();
-    });
+    client.rows(window).then((got) => live && setRows(new Map(got.map((r, k) => [window[k], r]))));
     return () => { live = false; };
-  }, [client, refs, range, descTick]);
+  }, [client, refs, range, rowsVersion]);
 
   // Keep the keyboard cursor in view.
   useEffect(() => {

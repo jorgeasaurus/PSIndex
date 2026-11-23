@@ -37,40 +37,89 @@ export interface Param {
   description?: string;
 }
 
+export interface Syntax {
+  /** Each parameter set as its top-level groups ("Get-X", "-Name <T>", "[-Opt <T>]", "[-Switch]"). */
+  sets: string[][];
+  /** Parameters across all sets, required first, pipeline/proxy plumbing last. */
+  params: Param[];
+}
+
 const COMMON = new Set([
   'Break', 'Headers', 'HttpPipelineAppend', 'HttpPipelinePrepend', 'Proxy', 'ProxyCredential',
   'ProxyUseDefaultCredentials', 'ResponseHeadersVariable', 'WhatIf', 'Confirm', 'DefaultProfile',
 ]);
 
-/** Parse parameters out of one or more syntax blocks (param sets are separated by blank lines). */
-export function parseParams(syntax: string): Param[] {
-  const seen = new Map<string, Param>();
-  for (const set of syntax.split(/\n\s*\n/)) {
-    const body = set.replace(/\s+/g, ' ').replace(/\[<CommonParameters>\]/g, '');
-    // Walk bracket depth so we know whether a parameter is optional.
-    let depth = 0;
-    for (let i = 0; i < body.length; i++) {
-      const ch = body[i];
-      if (ch === '[') { depth++; continue; }
-      if (ch === ']') { depth = Math.max(0, depth - 1); continue; }
-      if (ch !== '-' || (i > 0 && /[\w-]/.test(body[i - 1]))) continue;
-      const m = /^-([A-Za-z]\w*)(\]?)(?:\s+<([^>]+)>)?/.exec(body.slice(i));
-      if (!m) continue;
-      const name = m[1];
-      // "[-Name] <Type>" marks a positional parameter: the name itself is bracketed.
-      const positional = body[i - 1] === '[' && m[2] === ']' && m[3] !== undefined;
-      const required = positional ? depth <= 1 : depth === 0;
-      const type = m[3] ?? 'Switch';
-      const prev = seen.get(name);
-      if (!prev) seen.set(name, { name, type, required, positional });
-      else {
-        prev.required = prev.required && required;
-        if (prev.type === 'Switch' && type !== 'Switch') prev.type = type;
-      }
-      i += name.length; // keep scanning brackets after the name so depth stays right
+export const isCommonParam = (n: string) => COMMON.has(n);
+
+/**
+ * Split one parameter set into top-level groups: whitespace only separates groups outside
+ * [...] and <...>. A bare <Type> joins the group before it ("-Name <T>", "[-Identity] <T>").
+ * A "]" that closes a bracket opened before an unclosed "<" ends it too (some docs write
+ * "[-Status <StatusEnum]"); "]" inside a type ("<String[]>") does not.
+ */
+function groupsOf(set: string): string[] {
+  const groups: string[] = [];
+  let brackets = 0, angleAt = -1, cur = ''; // angleAt: bracket depth where the open "<" started
+  const flush = () => {
+    if (!cur) return;
+    if (cur.startsWith('<') && groups.length) groups[groups.length - 1] += ' ' + cur;
+    else groups.push(cur);
+    cur = '';
+  };
+  for (const ch of set.replace(/\s+/g, ' ').trim()) {
+    if (ch === ' ' && !brackets && angleAt < 0) { flush(); continue; }
+    if (ch === '<') angleAt = brackets;
+    else if (ch === '>') angleAt = -1;
+    else if (ch === '[') brackets++;
+    else if (ch === ']') {
+      brackets = Math.max(0, brackets - 1);
+      if (brackets < angleAt) angleAt = -1;
     }
+    cur += ch;
   }
-  return [...seen.values()].sort((a, b) => Number(b.required) - Number(a.required) || Number(COMMON.has(a.name)) - Number(COMMON.has(b.name)));
+  flush();
+  return groups;
 }
 
-export const isCommonParam = (n: string) => COMMON.has(n);
+/**
+ * The parameters a group declares: usually one, but some docs pack several into one bracket
+ * or omit the space between groups. A group is optional when bracketed as a whole;
+ * "[-Name] <T>" is positional.
+ */
+function paramsOf(group: string): Param[] {
+  // Type: a closed "<T>" (which may contain "[]"), else an unclosed "<T" up to the next "]".
+  return [...group.matchAll(/(^|[[ ])-([A-Za-z]\w*)(\]?)(?: <(?:([^<>]+)>|([^<>\]]+)))?/g)].map((m) => {
+    const type = m[4] ?? m[5];
+    const positional = m[1] === '[' && m[3] === ']' && type !== undefined;
+    const optional = group.startsWith('[') && !(positional && group.startsWith('[-'));
+    return { name: m[2], type: type ?? 'Switch', required: !optional, positional };
+  });
+}
+
+export function parseSyntax(syntax: string): Syntax {
+  const sets = syntax.split(/\n\s*\n/).map((s) => groupsOf(s)).filter((g) => g.length);
+  const seen = new Map<string, Param>();
+  for (const p of sets.flat().flatMap(paramsOf)) {
+    const prev = seen.get(p.name);
+    if (!prev) seen.set(p.name, p);
+    else {
+      prev.required &&= p.required; // required only if every set requires it
+      if (prev.type === 'Switch') prev.type = p.type;
+    }
+  }
+  const params = [...seen.values()].sort((a, b) => Number(b.required) - Number(a.required) || Number(COMMON.has(a.name)) - Number(COMMON.has(b.name)));
+  return { sets, params };
+}
+
+/** Parameters some pipelines document (MECM) take precedence; the syntax fills in type and position. */
+export function withDocumented(parsed: Param[], documented: { name: string; type: string; required: boolean; description?: string }[] = []): Param[] {
+  if (!documented.length) return parsed;
+  const byName = new Map(parsed.map((p) => [p.name, p]));
+  return documented.map((p) => ({
+    name: p.name,
+    type: p.type || byName.get(p.name)?.type || '',
+    required: p.required,
+    positional: byName.get(p.name)?.positional ?? false,
+    description: p.description,
+  }));
+}

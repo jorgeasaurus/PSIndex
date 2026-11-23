@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { Search, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { SearchClient } from './client';
-import { AsciiField, type Theme } from './ascii';
+import { AsciiField } from './ascii';
+import { effectiveTheme, readTheme, writeTheme, type Theme } from './theme';
 import { ResultList, ResultsSkeleton } from './ResultList';
 import { Detail } from './Detail';
-import { ALL, SOURCES, TOTAL, isScope, scopeOf, srcStyle } from './sources';
+import { ALL, SOURCES, SOURCE_NAMES, TOTAL, isScope, scopeOf, srcStyle } from './sources';
 import type { Facets, Filters, Row, SourceId } from './types';
 
 const EMPTY_FILTERS: Filters = { source: ALL.id, verb: '', module: '', category: '', extra: '', examples: false };
@@ -66,7 +67,6 @@ export default function App() {
   const [ms, setMs] = useState(0);
   const [active, setActive] = useState(0);
   const [open, setOpen] = useState<Open>(CLOSED);
-  const [descTick, setDescTick] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [theme, setTheme] = useState<Theme | null>(null); // null = follow the OS
   const [loadError, setLoadError] = useState('');
@@ -84,17 +84,13 @@ export default function App() {
     setOpen({ key: initial.open, row: null });
     setClient(new SearchClient({
       onResults: (r) => { setRefs(r.refs); setFacets(r.facets); setMs(r.ms); },
-      onDescriptions: () => setDescTick((t) => t + 1),
       onLoadError: setLoadError,
     }));
     if (canvasRef.current) {
       field.current = new AsciiField(canvasRef.current);
       field.current.start();
     }
-    try {
-      const saved = localStorage.getItem('psindex-theme') as Theme | null;
-      if (saved) setTheme(saved);
-    } catch {}
+    setTheme(readTheme());
   }, []);
 
   // Run search whenever the query or filters change.
@@ -116,15 +112,10 @@ export default function App() {
 
   // Field tint follows the source and theme; keep the active tab visible on narrow screens.
   useEffect(() => {
-    field.current?.setTone(scopeOf(filters.source).color, theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    field.current?.setTone(scopeOf(filters.source).color, effectiveTheme(theme));
     document.querySelector('.source.is-on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [filters.source, theme]);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
-    try { theme ? localStorage.setItem('psindex-theme', theme) : localStorage.removeItem('psindex-theme'); } catch {}
-  }, [theme]);
 
   // Global keys: "/" or Ctrl/Cmd+K focuses search.
   useEffect(() => {
@@ -180,8 +171,9 @@ export default function App() {
 
   const resultsLabel = loadError ? 'Index unavailable' : refs == null ? 'Loading index…' : `${fmt.format(refs.length)} ${refs.length === 1 ? 'result' : 'results'}`;
   const toggleTheme = () => {
-    const dark = theme ? theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-    setTheme(dark ? 'light' : 'dark');
+    const next: Theme = effectiveTheme(theme) === 'dark' ? 'light' : 'dark';
+    writeTheme(next);
+    setTheme(next);
   };
 
   return (
@@ -193,7 +185,7 @@ export default function App() {
           <a class="wordmark" data-quiet href="/" aria-label="PSIndex home" onClick={(e) => { e.preventDefault(); setQ(''); setFilters(EMPTY_FILTERS); close(); }}>
             <span class="wordmark-ps">PS</span>Index
           </a>
-          <p class="tagline" data-quiet>PowerShell cmdlets for Graph, Az, Entra, Exchange and MECM. One index.</p>
+          <p class="tagline" data-quiet>PowerShell cmdlets for {SOURCE_NAMES}. One index.</p>
           <div class="band-actions" data-quiet>
             <button class="icon-btn" type="button" onClick={toggleTheme} aria-label="Toggle light or dark theme">
               <Sun class="i-sun" size={18} /><Moon class="i-moon" size={18} />
@@ -256,7 +248,6 @@ export default function App() {
             setActive={setActive}
             openKey={open.key}
             onOpen={openRow}
-            descTick={descTick}
             query={q}
             empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={!sameFilters(filters, EMPTY_FILTERS)} reset={() => setFilters(EMPTY_FILTERS)} />}
             failed={loadError ? (
@@ -344,7 +335,7 @@ function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) {
     <div class="intro">
       <h2>Type a fragment. Get the command.</h2>
       <p class="intro-lede">
-        {fmt.format(TOTAL)} cmdlets from five Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
+        {fmt.format(TOTAL)} cmdlets from {SOURCES.length} Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
       </p>
       <ul class="intro-samples" aria-label="Example searches">
         {SOURCES.map((s) => (

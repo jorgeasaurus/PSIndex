@@ -1,11 +1,12 @@
 ---
 import '../styles/global.css';
 import App from '../app/App';
-import data from '../sources.generated.json';
+import { SOURCES, SOURCE_LABELS, TOTAL, assetUrl } from '../app/sources';
+import { THEME_KEY } from '../app/theme';
 
 const fmt = new Intl.NumberFormat('en-US');
 const title = 'PSIndex — PowerShell cmdlet search for Microsoft 365 and Azure';
-const description = `Search ${fmt.format(data.total)} Microsoft Graph, Az, Entra, Exchange and Configuration Manager cmdlets, in one place.`;
+const description = `Search ${fmt.format(TOTAL)} ${SOURCE_LABELS} cmdlets in one place.`;
 ---
 <!doctype html>
 <html lang="en">
@@ -20,9 +21,9 @@ const description = `Search ${fmt.format(data.total)} Microsoft Graph, Az, Entra
     <meta property="og:title" content="PSIndex" />
     <meta property="og:description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="preload" href={`/idx/graph.json?v=${data.build}`} as="fetch" crossorigin />
-    <script is:inline>
-      try { const t = localStorage.getItem('psindex-theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+    {SOURCES.map((s) => <link rel="preload" href={assetUrl(`idx/${s.id}.json`)} as="fetch" crossorigin />)}
+    <script is:inline define:vars={{ THEME_KEY }}>
+      try { const t = localStorage.getItem(THEME_KEY); if (t) document.documentElement.dataset.theme = t; } catch {}
     </script>
   </head>
   <body>

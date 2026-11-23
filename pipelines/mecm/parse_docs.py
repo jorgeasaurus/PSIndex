@@ -14,6 +14,8 @@ import re
 import sys
 from pathlib import Path
 
+from common import source_dir
+
 NOUN_CATEGORIES = [
     ('AppV', 'Application Management'),
     ('DeploymentType', 'Application Management'),
@@ -347,7 +349,7 @@ def main():
         }
 
     # Output directory
-    out_dir = Path(__file__).resolve().parent.parent.parent / 'data' / 'mecm'
+    out_dir = source_dir('mecm')
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 

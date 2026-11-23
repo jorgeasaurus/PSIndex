@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { BUILD, SOURCES, queryTokens, scopeOf } from './sources';
+import { SOURCES, assetUrl, queryTokens, scopeOf } from './sources';
 import type { Facets, Filters, FromWorker, IndexShard, Row, ToWorker } from './types';
 
 const SHIFT = 20; // ref = (sourceIndex << SHIFT) | rowIndex
@@ -36,8 +36,7 @@ function parseKey(key: string) {
 }
 
 async function getJson<T>(file: string): Promise<T> {
-  const url = new URL(`/idx/${file}`, self.location.origin);
-  url.searchParams.set('v', BUILD); // same build as this worker, so shards never mix across deploys
+  const url = new URL(assetUrl(`idx/${file}`), self.location.origin);
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status} for ${url.pathname}`);
   return r.json();

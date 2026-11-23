@@ -22,8 +22,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import keep_previous_versions  # noqa: E402
+from common import keep_previous_versions, source_dir
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -292,8 +291,7 @@ def main():
         print(f"Error: docs directory not found: {docs_dir}", file=sys.stderr)
         sys.exit(1)
 
-    script_dir = Path(__file__).resolve().parent
-    data_dir = script_dir.parent.parent / "data" / "entra"
+    data_dir = source_dir("entra")
     modules_dir = data_dir / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 

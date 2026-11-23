@@ -1,6 +1,13 @@
-"""Helpers shared by the pipelines. Import with the pipelines/ directory on sys.path."""
+"""Helpers shared by the pipelines. refresh.sh runs each parser with PYTHONPATH=pipelines."""
 import json
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def source_dir(source_id):
+    """data/<source_id>/ — where a pipeline writes manifest.json, descriptions.json and modules/."""
+    return REPO_ROOT / "data" / source_id
 
 
 def keep_previous_versions(versions, modules, data_dir):

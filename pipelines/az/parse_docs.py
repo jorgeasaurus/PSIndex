@@ -17,6 +17,8 @@ import json
 import sys
 from pathlib import Path
 
+from common import source_dir
+
 # ── Category mapping ──────────────────────────────────────────────────────────
 CATEGORY_MAP = [
     ("Accounts", "Authentication"),
@@ -191,9 +193,7 @@ def main():
         sys.exit(1)
 
     docs_root = sys.argv[1]
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent
-    out_dir = repo_root.parent / 'data' / 'az'
+    out_dir = source_dir('az')
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 

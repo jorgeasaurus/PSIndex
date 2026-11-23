@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: "Comma-separated sources to refresh (graph,az,entra,exchange,mecm) or 'all'"
+        description: "Comma-separated sources to refresh (ids of pipelines/<id>/refresh.sh) or 'all'"
         default: all
 
 concurrency:

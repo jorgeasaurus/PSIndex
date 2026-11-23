@@ -3,6 +3,7 @@
 // Needs Playwright with Chromium available (`npx playwright install chromium`).
 const { spawn } = require('node:child_process');
 const { chromium } = require('playwright');
+const { total } = require('../src/sources.generated.json');
 
 const PORT = 4399;
 const BASE = `http://localhost:${PORT}`;
@@ -17,25 +18,37 @@ async function waitForServer() {
   throw new Error('preview server did not start');
 }
 
+const TOTAL_LABEL = `${total.toLocaleString('en-US')} results`;
+const param = (p, k) => new URL(p.url()).searchParams.get(k);
+const nextFrame = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
 const rowsReady = (p) => p.waitForSelector('.result:not(.result-skel), .empty', { timeout: 20000 });
 
 async function run(browser) {
   let ctx = await browser.newContext();
   let p = await ctx.newPage();
+  const moduleUrls = [];
+  p.on('request', (r) => r.url().includes('/data/') && moduleUrls.push(r.url()));
   const errors = [];
   p.on('pageerror', (e) => errors.push(e.message));
 
   // Search across all sources, open the top hit with the keyboard.
   await p.goto(BASE);
   await rowsReady(p);
-  check(/40,9\d\d results/.test(await p.textContent('.count')), 'loads every source', await p.textContent('.count'));
+  check((await p.textContent('.count')) === TOTAL_LABEL, 'loads every source', await p.textContent('.count'));
   await p.fill('input[type=search]', 'getmguser');
   await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent === 'Get-MgUser');
   await p.keyboard.press('Enter');
   await p.waitForSelector('.detail .code-syntax');
   check((await p.textContent('.detail-title code')) === 'Get-MgUser', 'hyphenless query ranks Get-MgUser first');
   check((await p.locator('.params tbody tr').count()) > 3, 'syntax parsed into parameters');
-  check(new URL(p.url()).searchParams.get('c') === 'graph:Get-MgUser', 'open entry is in the URL');
+  check(param(p, 'c') === 'graph:Get-MgUser', 'open entry is in the URL');
+  check(moduleUrls.length > 0 && moduleUrls.every((u) => u.includes('?v=')), 'module files fetched at versioned URLs', moduleUrls[0]);
+
+  // The theme toggle applies and remembers an explicit theme.
+  const before = await p.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  await p.click('button[aria-label="Toggle light or dark theme"]');
+  const after = await p.evaluate(() => [document.documentElement.dataset.theme, localStorage.getItem('psindex-theme')]);
+  check(after[0] && after[0] !== before && after[0] === after[1], 'theme toggle applies and stores the theme', after.join(' / '));
 
   // MECM documents its parameters; their descriptions render.
   await p.goto(`${BASE}/?c=mecm:Invoke-CMClientAction`);
@@ -60,16 +73,15 @@ async function run(browser) {
 
   // A legacy unqualified link adopts the canonical key and highlights the row.
   await p.goto(`${BASE}/?s=entra&q=Connect-Entra&c=entra:Connect-Entra`);
-  await p.waitForSelector('.detail .code');
-  await p.waitForTimeout(300);
-  const c = new URL(p.url()).searchParams.get('c');
+  await p.waitForFunction(() => new URLSearchParams(location.search).get('c')?.includes('@'));
+  const c = param(p, 'c');
   check(c.includes('@') && (await p.locator('.result.is-open').count()) === 1, 'legacy link is canonicalised', c);
 
   // Switching source keeps the verb filter and drops source-specific ones (module, API).
   await p.goto(`${BASE}/?s=graph&verb=Remove&ver=beta`);
   await rowsReady(p);
   await p.click('.source:has-text("Az")');
-  await p.waitForTimeout(400);
+  await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent?.includes('-Az'));
   const u = new URL(p.url()).searchParams;
   check(u.get('s') === 'az' && u.get('verb') === 'Remove' && !u.get('ver'), 'source switch keeps verb, drops API filter', u.toString());
   check((await p.locator('.result .result-name').first().textContent()).startsWith('Remove-Az'), 'verb filter applies to the new source');
@@ -79,21 +91,21 @@ async function run(browser) {
   await rowsReady(p);
   for (let k = 1; k <= 80; k++) {
     await p.evaluate((y) => (document.querySelector('.results').scrollTop = y), k * 3200);
-    await p.waitForTimeout(20);
+    await nextFrame(p);
   }
-  await p.waitForTimeout(500);
-  check((await p.locator('.result-skel').count()) === 0, 'deep scroll keeps rows rendered');
+  const settled = await p.waitForFunction(() => !document.querySelector('.result-skel'), null, { timeout: 5000 }).then(() => true, () => false);
+  check(settled, 'deep scroll keeps rows rendered');
   check(!errors.length, 'no page errors', errors.join('; '));
   await ctx.close();
 
-  // The largest shard is fetched once, at its versioned URL.
+  // Each shard is fetched once (preload and worker share the URL), versioned by build.
   ctx = await browser.newContext();
   const graphUrls = new Set();
   ctx.on('request', (r) => /\/idx\/graph\.json/.test(r.url()) && graphUrls.add(r.url()));
   p = await ctx.newPage();
   await p.goto(BASE);
   await rowsReady(p);
-  check(graphUrls.size === 1 && [...graphUrls][0].includes('?v='), 'graph shard requested once, versioned', [...graphUrls].join(', '));
+  check(graphUrls.size === 1 && [...graphUrls][0].includes('?v='), 'shard requested at one versioned URL', [...graphUrls].join(', '));
   await ctx.close();
 
   // A failed shard surfaces an error instead of loading forever.
@@ -111,12 +123,13 @@ async function run(browser) {
   p = await ctx.newPage();
   const werr = [];
   p.on('console', (m) => m.type() === 'error' && werr.push(m.text()));
+  const descLoaded = p.waitForResponse(/\/idx\/mecm\.desc\.json/);
   await p.goto(`${BASE}/?s=mecm`);
   await rowsReady(p);
-  await p.waitForTimeout(600);
+  await descLoaded;
   await p.fill('input[type=search]', 'device collection');
-  await p.waitForTimeout(400);
-  check(/results? ·/.test(await p.textContent('.count')) && !werr.length, 'mismatched description shard is ignored', werr.join('; '));
+  const searched = await p.waitForFunction(() => /Collection/.test(document.querySelector('.result .result-name')?.textContent ?? ''), null, { timeout: 5000 }).then(() => true, () => false);
+  check(searched && !werr.length, 'mismatched description shard is ignored', werr.join('; '));
   await ctx.close();
 
   // Closing a deep-linked entry before the index loads keeps it closed.
@@ -124,11 +137,12 @@ async function run(browser) {
   await ctx.route('**/idx/graph.json*', async (r) => { await new Promise((res) => setTimeout(res, 2000)); r.continue(); });
   p = await ctx.newPage();
   await p.goto(`${BASE}/?c=graph:Get-MgUser`);
-  await p.waitForTimeout(500);
-  await p.click('.wordmark');
+  await p.click('.wordmark'); // while the delayed shard keeps the lookup pending
   await rowsReady(p);
-  await p.waitForTimeout(600);
-  check(!new URL(p.url()).searchParams.get('c') && !(await p.locator('.detail-title').count()), 'dismissed deep link stays closed');
+  // A search issued now is answered after the pending lookup (the worker replies in order).
+  await p.fill('input[type=search]', 'get-mguser');
+  await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent === 'Get-MgUser');
+  check(!param(p, 'c') && !(await p.locator('.detail-title').count()), 'dismissed deep link stays closed');
   await ctx.close();
 }
 

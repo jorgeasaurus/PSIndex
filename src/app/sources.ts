@@ -2,14 +2,24 @@ import generated from '../sources.generated.json';
 import type { SourceId, SourceMeta } from './types';
 
 /** The source list, bundled at build time into both the page and the worker (see scripts/build-index.mjs). */
-export const SOURCES = generated.sources as SourceMeta[];
+export const SOURCES: SourceMeta[] = generated.sources;
 export const TOTAL = generated.total;
-export const BUILD = generated.build;
 
 const fmt = new Intl.NumberFormat('en-US');
+const list = new Intl.ListFormat('en', { type: 'conjunction' });
+
+/** "Graph, Az, Entra, Exchange, and MECM" — for copy that names every source. */
+export const SOURCE_NAMES = list.format(SOURCES.map((s) => s.short));
+export const SOURCE_LABELS = list.format(SOURCES.map((s) => s.label));
+
+/**
+ * URL of a build artifact (/idx/… shards, /data/… module files). Versioned by build, so a page,
+ * its worker and every file they fetch always come from the same deploy.
+ */
+export const assetUrl = (path: string) => `/${path}?v=${generated.build}`;
 
 /** The extra value a source flags as a caution, e.g. Graph's "beta" API. */
-export const isWarnExtra = (s: SourceMeta, extra: string) => !!s.extraWarn && extra === s.extraWarn;
+export const isWarnExtra = (s: SourceMeta, extra: string) => !!extra && extra === s.extra?.warn;
 
 /** Query tokens as both the worker and the highlighter split them. */
 export const queryTokens = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -24,8 +34,8 @@ export interface Scope {
   placeholder: string;
   /** " in Graph", or '' for every source. */
   inLabel: string;
-  /** Label of the source's extra facet ('' = none, including "all"). */
-  extraLabel: string;
+  /** Label of the source's extra facet; null for sources without one and for "all". */
+  extraLabel: string | null;
   sources: SourceMeta[];
   /** Module and extra facets only make sense within one source. */
   perSourceFacets: boolean;
@@ -36,7 +46,7 @@ export const ALL: Scope = {
   color: '#b9c3d6',
   placeholder: `Search ${fmt.format(TOTAL)} cmdlets`,
   inLabel: '',
-  extraLabel: '',
+  extraLabel: null,
   sources: SOURCES,
   perSourceFacets: false,
 };
@@ -48,7 +58,7 @@ const SCOPES = new Map<SourceId, Scope>([
     color: s.color,
     placeholder: `Search ${fmt.format(s.count)} ${s.short} cmdlets`,
     inLabel: ` in ${s.short}`,
-    extraLabel: s.extraLabel,
+    extraLabel: s.extra?.label ?? null,
     sources: [s],
     perSourceFacets: true,
   }]),

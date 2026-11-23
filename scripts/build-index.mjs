@@ -15,15 +15,17 @@ const DESC_MAX = 220;
 const LEARN_MODULE = 'https://learn.microsoft.com/powershell/module/{module}/{name}';
 
 // Every per-source fact lives here.
-//   extra:  an optional per-cmdlet facet; `field` is its key in the pipeline's manifest rows,
-//           `warn` a value shown as a caution (Graph/Entra "beta").
+//   extra:  an optional per-cmdlet facet (null = none); `field` is its key in the pipeline's
+//           manifest rows, `warn` an optional value shown as a caution (Graph/Entra "beta").
+// The written shape is SourceMeta in src/app/types.ts; sources.ts assigns it without a cast,
+// so `npm run typecheck` fails if the two drift.
 //   sample: the example search the intro panel offers.
 const SOURCES = [
   { id: 'graph', label: 'Microsoft Graph', short: 'Graph', color: '#9b8cff', sample: 'Get-MgUser', learn: LEARN_MODULE, extra: { label: 'API', field: 'a', warn: 'beta' } },
   { id: 'az', label: 'Azure (Az)', short: 'Az', color: '#4cb3ff', sample: 'Get-AzVM', learn: LEARN_MODULE, extra: null },
   { id: 'entra', label: 'Microsoft Entra', short: 'Entra', color: '#2fd0b5', sample: 'Get-EntraGroupMember', learn: LEARN_MODULE, extra: { label: 'API', field: 'a', warn: 'beta' } },
   { id: 'exchange', label: 'Exchange, Teams & SharePoint', short: 'Exchange', color: '#f2b33d', sample: 'Set-Mailbox', learn: LEARN_MODULE, extra: null },
-  { id: 'mecm', label: 'Configuration Manager', short: 'MECM', color: '#7fd45a', sample: 'Invoke-CMClientAction', learn: 'https://learn.microsoft.com/powershell/module/configurationmanager/{name}', extra: { label: 'Site role', field: 'r', warn: '' } },
+  { id: 'mecm', label: 'Configuration Manager', short: 'MECM', color: '#7fd45a', sample: 'Invoke-CMClientAction', learn: 'https://learn.microsoft.com/powershell/module/configurationmanager/{name}', extra: { label: 'Site role', field: 'r' } },
 ];
 
 const readJson = async (p) => JSON.parse(await readFile(p, 'utf8'));
@@ -108,8 +110,8 @@ async function main() {
     const { index, desc } = buildShard(rows);
     await writeFile(join(OUT_IDX, `${src.id}.json`), JSON.stringify(index));
     await writeFile(join(OUT_IDX, `${src.id}.desc.json`), JSON.stringify(desc));
-    const { extra, ...meta } = src;
-    sources.push({ ...meta, extraLabel: extra?.label ?? '', extraWarn: extra?.warn ?? '', count: rows.length, version: version ?? '' });
+    const extra = src.extra && { label: src.extra.label, ...(src.extra.warn && { warn: src.extra.warn }) };
+    sources.push({ ...src, extra, count: rows.length, version: version ?? '' });
     console.log(`  ${src.id.padEnd(9)} ${String(rows.length).padStart(6)} cmdlets`);
   }
   const total = sources.reduce((a, s) => a + s.count, 0);
