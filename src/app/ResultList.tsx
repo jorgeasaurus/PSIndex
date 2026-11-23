@@ -36,6 +36,10 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
   const active = cursor.id === searchId ? cursor.i : 0;
   const setActive = (i: number) => setCursor({ id: searchId, i });
 
+  // Any change of the open entry or the search supersedes a pending Enter.
+  const openToken = useRef(0);
+  useEffect(() => { openToken.current++; }, [openKey, searchId]);
+
   useImperativeHandle(navRef, () => ({
     move: (delta) => {
       if (!refs?.length) return;
@@ -48,8 +52,16 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
       if (top < el.scrollTop) el.scrollTop = top;
       else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
     },
-    // The cursor is kept in view, so its row is normally materialised; if it is not yet, Enter does nothing.
-    openActive: () => { const row = refs?.length ? rows.get(refs[active]) : undefined; if (row) onOpen(row); },
+    openActive: () => {
+      if (!refs?.length) return;
+      const ref = refs[active];
+      const row = rows.get(ref);
+      if (row) return onOpen(row);
+      // Not materialised yet (Enter right after typing, or past the window): fetch it, unless the
+      // selection or the search changes before the reply lands.
+      const token = ++openToken.current;
+      client.request('rows', { refs: [ref] }).then(([r]) => token === openToken.current && onOpen(r));
+    },
   }), [refs, rows, active, searchId, onOpen]);
 
   // A new search starts at the top; a refresh of the same search (descriptions arriving) keeps the user's place.

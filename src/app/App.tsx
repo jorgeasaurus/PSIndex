@@ -60,12 +60,18 @@ function Search() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const listRef = useRef<ListNav>(null);
+  const enterPending = useRef(false);
   const scope = scopeOf(filters.source);
   const { theme, toggle: toggleTheme } = useTheme();
   const pulse = useAsciiField(canvasRef, scope.color, theme);
   const refs = results?.refs ?? null;
 
-  useEffect(() => client.search(q, filters), [q, filters]);
+  // A layout effect, so the search is sent within the render: a key pressed right after typing
+  // (Enter) already sees it as the latest, not a passive effect still waiting for the next frame.
+  useLayoutEffect(() => client.search(q, filters), [q, filters]);
+  useEffect(() => {
+    if (enterPending.current && client.isLatest(results?.id)) { enterPending.current = false; listRef.current?.openActive(); }
+  }, [results?.id]);
   const open = sel && 'row' in sel ? sel.row : null;
   const link = sel && 'link' in sel ? sel.link : '';
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
@@ -106,7 +112,7 @@ function Search() {
     const pane = detailRef.current?.getBoundingClientRect();
     if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
   }, []);
-  const close = useCallback(() => setSel(null), []);
+  const close = useCallback(() => { enterPending.current = false; setSel(null); }, []);
 
   const onKeyDown = (e: KeyboardEvent) => {
     // The box is autofocused, so the "/" shortcut lands here; nobody searches for a leading slash.
@@ -116,7 +122,11 @@ function Search() {
     if (!nav) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); nav.move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); nav.move(-1); }
-    else if (e.key === 'Enter') { e.preventDefault(); nav.openActive(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      // Enter means the top hit of what is typed: if those results are still coming, open on arrival.
+      if (client.isLatest(results?.id)) nav.openActive(); else enterPending.current = true;
+    }
   };
 
   const filterCount = activeFilters(filters);

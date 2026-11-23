@@ -58,6 +58,14 @@ async function run(browser) {
     check(third && third !== 'Get-MgUser' && activeTop === '0px', 'keyboard cursor opens its row and resets per search', `${third}, active at ${activeTop}`);
   }
 
+  // Enter right after typing opens the top hit even before its row has rendered.
+  {
+    await p.fill('input[type=search]', 'get-azvmss');
+    await p.keyboard.press('Enter');
+    await p.waitForFunction(() => document.querySelector('.detail-title code')?.textContent === 'Get-AzVmss', null, { timeout: 5000 }).then(() => true, () => false)
+      .then(async (ok) => check(ok, 'Enter right after typing opens the top hit', await p.textContent('.detail-title code').catch(() => '')));
+  }
+
   // Opening a related entry from a scrolled detail pane starts the new entry at its top.
   {
     await p.fill('input[type=search]', 'get-mguser');

@@ -35,6 +35,11 @@ export class SearchClient {
     this.post({ type: 'search', id: this.latestSearch, q, filters });
   }
 
+  /** Whether results with this id answer the latest search (false while a newer one is in flight). */
+  isLatest(id: number | undefined) {
+    return id === this.latestSearch;
+  }
+
   /** Ask the worker a question. It answers once its index has loaded, or rejects if the load failed. */
   request<K extends RequestType>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
     const id = ++this.seq;
