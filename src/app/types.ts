@@ -8,7 +8,6 @@ export interface SourceMeta {
   color: string;
   /** The shard's `x` facet for this source: its label and an optional value shown as a caution ("beta"). */
   extra: { label: string; warn?: string } | null;
-  learn: string; // Microsoft Learn URL template with {module} / {name}
   sample: string; // example search shown on the intro panel
   count: number;
   version: string; // '' when unknown
@@ -97,6 +96,5 @@ export type ToWorker =
 export type FromWorker =
   | { type: 'ready' }
   | { type: 'load-error'; message: string }
-  | { type: 'desc-ready' }
   | ({ type: 'results'; id: number } & Results)
   | { type: 'reply'; id: number; reply: Requests[RequestType]['reply'] };

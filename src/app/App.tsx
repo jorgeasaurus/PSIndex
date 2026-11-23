@@ -150,7 +150,7 @@ function Search() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
     else if (e.key === 'Enter') {
       e.preventDefault();
-      const [row] = await client.rows([refs[active]]);
+      const [row] = await client.request('rows', { refs: [refs[active]] });
       openRow(row);
     }
   };

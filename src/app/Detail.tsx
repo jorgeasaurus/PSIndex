@@ -5,7 +5,7 @@ import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
 import { isCommonParam, parseSyntax, tokenize, withDocumented } from './powershell';
 import { isWarnExtra, sourceOf, srcStyle } from './sources';
-import type { CmdletDetail, CmdletFile, Row, SourceMeta } from './types';
+import type { CmdletDetail, CmdletFile, Row } from './types';
 
 interface Props {
   row: Row;
@@ -27,8 +27,6 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
     return () => { live = false; };
   }, [row.key]);
 
-  const learn = learnUrl(row, src);
-
   return (
     <article class="detail" ref={top} style={srcStyle(row.source)} aria-labelledby="detail-title">
       <div class="detail-head">
@@ -39,14 +37,14 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
         </h2>
         <div class="tags">
           <span class="tag tag-source"><span class="source-dot" aria-hidden="true" />{src.short}</span>
-          {row.module && <span class="tag">{row.module}</span>}
+          <span class="tag">{row.module}</span>
           {row.verb && <span class="tag">{row.verb}</span>}
           {showsCategory(row) && <span class="tag">{row.category}</span>}
           {row.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{row.extra}</span>}
           {row.perms > 0 && <span class="tag">{row.perms} permission{row.perms === 1 ? '' : 's'}</span>}
         </div>
         <div class="detail-links">
-          {learn && <a class="btn" href={learn} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} /></a>}
+          <a class="btn" href={learnUrl(row)} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} /></a>
           <CopyTextButton text={shareUrl(row)} label="Copy link" icon={<Link2 size={14} />} />
         </div>
       </div>
@@ -176,10 +174,7 @@ function CodeFrame({ copy, syntax, children }: { copy: string; syntax?: boolean;
 /** A category tag adds nothing when it repeats the module ("Groups" for Microsoft.Graph.Groups). */
 const showsCategory = (row: Row) => !!row.category && row.category !== row.module && !row.module.endsWith('.' + row.category);
 
-function learnUrl(row: Row, src: SourceMeta): string {
-  if (src.learn.includes('{module}') && !row.module) return '';
-  return src.learn.replace('{module}', row.module.toLowerCase()).replace('{name}', row.name.toLowerCase());
-}
+const learnUrl = (row: Row) => `https://learn.microsoft.com/powershell/module/${row.module.toLowerCase()}/${row.name.toLowerCase()}`;
 
 function shareUrl(row: Row) {
   const u = new URL(location.origin + location.pathname);

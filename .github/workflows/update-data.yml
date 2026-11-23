@@ -95,4 +95,10 @@ jobs:
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -m "chore(data): refresh ${changed}"
-          git push
+          # main may have moved since this run checked out; carry the data-only commit forward.
+          branch="${GITHUB_REF_NAME}"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "$branch" && git push origin "HEAD:$branch" && exit 0
+            sleep $((attempt * 5))
+          done
+          exit 1

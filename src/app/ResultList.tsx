@@ -53,7 +53,7 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, q
     if (!refs) return;
     const window = Array.from(refs.subarray(range.start, Math.min(refs.length, range.end)));
     let live = true;
-    client.rows(window).then((got) => live && setRows(new Map(got.map((r, k) => [window[k], r]))));
+    client.request('rows', { refs: window }).then((got) => live && setRows(new Map(got.map((r, k) => [window[k], r]))));
     return () => { live = false; };
   }, [client, refs, range]);
 
@@ -110,7 +110,7 @@ function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number
         <code class="result-name"><Mark text={row.name} q={query} /></code>
         <span class="result-meta">{tag}</span>
       </div>
-      <p class="result-desc">{row.desc || <span class="result-module">{row.module || row.category}</span>}</p>
+      <p class="result-desc">{row.desc || <span class="result-module">{row.module}</span>}</p>
     </div>
   );
 }

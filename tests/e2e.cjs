@@ -70,20 +70,20 @@ async function run(browser) {
     await p3.goto(BASE);
     await rowsReady(p3);
     // Brightest glyph channel in the top band of the canvas: light theme draws darker glyphs.
-    const brightest = () => p3.evaluate(() => {
-      const c = document.querySelector('canvas.field');
-      const d = c.getContext('2d').getImageData(0, 0, c.width, Math.min(c.height, 300)).data;
-      let max = 0;
-      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 100) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
-      return max;
+    await p3.evaluate(() => {
+      window.__brightest = () => {
+        const c = document.querySelector('canvas.field');
+        const d = c.getContext('2d').getImageData(0, 0, c.width, Math.min(c.height, 300)).data;
+        let max = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 100) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
+        return max;
+      };
     });
+    const brightest = () => p3.evaluate(() => window.__brightest());
     const dark = await brightest();
     await p3.emulateMedia({ colorScheme: 'light' });
     await p3.waitForFunction((was) => {
-      const c = document.querySelector('canvas.field');
-      const d = c.getContext('2d').getImageData(0, 0, c.width, Math.min(c.height, 300)).data;
-      let max = 0;
-      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 100) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
+      const max = window.__brightest();
       return max > 0 && max < was * 0.8;
     }, dark, { timeout: 5000 }).then(() => true, () => false).then(async (ok) => {
       check(ok, 'field re-tints when the OS theme changes', `brightest channel ${dark} -> ${await brightest()}`);
@@ -192,14 +192,19 @@ async function run(browser) {
 
   // Closing a deep-linked entry before the index loads keeps it closed.
   ctx = await browser.newContext();
-  await ctx.route('**/idx/graph.json*', async (r) => { await new Promise((res) => setTimeout(res, 2000)); r.continue(); });
-  p = await ctx.newPage();
-  await p.goto(`${BASE}/?c=graph:Get-MgUser`);
-  // Wait for the interactive session (not the static server-rendered shell), then click Home
-  // while the delayed shard keeps the deep-link lookup pending.
-  await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
-  await p.evaluate(() => { window.__sameDocument = true; });
-  await p.click('.wordmark');
+  {
+    let release;
+    const gate = new Promise((r) => (release = r));
+    await ctx.route('**/idx/graph.json*', async (r) => { await gate; r.continue(); });
+    p = await ctx.newPage();
+    await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+    // Wait for the interactive session (not the static server-rendered shell), then click Home
+    // while the held shard keeps the deep-link lookup pending.
+    await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+    await p.evaluate(() => { window.__sameDocument = true; });
+    await p.click('.wordmark');
+    release();
+  }
   await rowsReady(p);
   // A search issued now is answered after the pending lookup (the worker replies in order).
   await p.fill('input[type=search]', 'get-mguser');

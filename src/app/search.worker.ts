@@ -75,9 +75,8 @@ async function load() {
 
   // Descriptions are bigger and only refine ranking; fetch them after the first result set is out.
   await Promise.all(loaded.map(loadDescriptions));
-  // Descriptions refine matching and the rows' text: let the client drop its cached rows,
-  // then re-run the latest search under its own id so its results replace the current ones.
-  post({ type: 'desc-ready' });
+  // Descriptions refine matching and the rows' text: re-run the latest search under its own id,
+  // so its fresh refs replace the current ones and the list re-reads its rows.
   if (lastSearch) runSearch(lastSearch);
 }
 
