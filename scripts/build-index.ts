@@ -20,22 +20,25 @@ interface SourceDef extends Pick<SourceMeta, 'id' | 'label' | 'short' | 'color' 
   extra: { label: string; field: string; warn?: string } | null;
   /** For a pipeline whose rows carry no module (MECM is one module), the module of every row. */
   module?: string;
+  /** Whether the manifest records a permission count per cmdlet (`p`). */
+  perms?: true;
 }
 
 // Every per-source fact lives here.
 const SOURCES: SourceDef[] = [
-  { id: 'graph', label: 'Microsoft Graph', short: 'Graph', color: '#9b8cff', sample: 'Get-MgUser', extra: { label: 'API', field: 'a', warn: 'beta' } },
+  { id: 'graph', label: 'Microsoft Graph', short: 'Graph', color: '#9b8cff', sample: 'Get-MgUser', perms: true, extra: { label: 'API', field: 'a', warn: 'beta' } },
   { id: 'az', label: 'Azure (Az)', short: 'Az', color: '#4cb3ff', sample: 'Get-AzVM', extra: null },
-  { id: 'entra', label: 'Microsoft Entra', short: 'Entra', color: '#2fd0b5', sample: 'Get-EntraGroupMember', extra: { label: 'API', field: 'a', warn: 'beta' } },
+  { id: 'entra', label: 'Microsoft Entra', short: 'Entra', color: '#2fd0b5', sample: 'Get-EntraGroupMember', perms: true, extra: { label: 'API', field: 'a', warn: 'beta' } },
   { id: 'exchange', label: 'Exchange, Teams & SharePoint', short: 'Exchange', color: '#f2b33d', sample: 'Set-Mailbox', extra: null },
   { id: 'mecm', label: 'Configuration Manager', short: 'MECM', color: '#7fd45a', sample: 'Invoke-CMClientAction', module: 'ConfigurationManager', extra: { label: 'Site role', field: 'r' } },
 ];
 
 // ---- Pipeline output (data/<source>/), as the parsers write it -----------------------------
 
-interface ManifestRow { n: string; v: string; c: string; e: boolean; m?: string; p?: number; [extra: string]: unknown }
-interface Manifest { v: string | null; d: ManifestRow[] }
-interface RawCmdlet { syntax?: unknown; examples?: unknown; permissions?: unknown; parameters?: unknown; description?: unknown }
+// Read as unknown and checked field by field: a parser change that breaks the shape fails the build.
+interface Manifest { v: unknown; d: unknown }
+interface RawCmdlet { syntax?: unknown; examples?: unknown; permissions?: unknown; parameters?: unknown }
+type RawParam = { name: string; type: string; required: boolean; description?: string };
 interface RawModuleFile { module: string; cmdlets: Record<string, RawCmdlet> }
 
 /** One index row, before it is split into columns. */
@@ -48,7 +51,7 @@ const clip = (s: string) => {
 };
 
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
-const params = (v: unknown): v is DocumentedParam[] => Array.isArray(v) && v.every((x) =>
+const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) =>
   typeof x?.name === 'string' && typeof x.type === 'string' && typeof x.required === 'boolean' && (x.description === undefined || typeof x.description === 'string'));
 
 /** The detail shape the app reads: every field present, so the UI never guesses. */
@@ -61,13 +64,40 @@ function normalizeCmdlet(where: string, c: RawCmdlet, description: string): Cmdl
     syntax: c.syntax,
     examples: c.examples,
     permissions: c.permissions ?? [], // only Graph and Entra document permissions
-    parameters: c.parameters ?? [], // only MECM documents parameters separately
-    description: typeof c.description === 'string' ? c.description : description,
+    // Only MECM documents parameters separately.
+    parameters: (c.parameters ?? []).map((p): DocumentedParam => ({ ...p, description: p.description ?? '' })),
+    description, // descriptions.json is the one source, as for the index row
+  };
+}
+
+/**
+ * One manifest row, checked: the fields every source writes, the source's own extra facet and
+ * permission count, and the module (and its file) the row resolves to.
+ */
+function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, string[]>, descriptions: Record<string, string>): Row {
+  if (typeof raw !== 'object' || raw === null) throw new Error(`${src.id} manifest: a row is not an object`);
+  const r = raw as Record<string, unknown>; // an object; each field is checked below
+  const name = typeof r.n === 'string' ? r.n : '';
+  const fail = (what: string): never => { throw new Error(`${src.id} manifest, ${name || JSON.stringify(raw)}: ${what}`); };
+  const str = (k: string) => { const v = r[k]; return typeof v === 'string' ? v : fail(`${k} is not a string`); };
+  if (!name) fail('n (name) is not a string');
+  const e = r.e;
+  if (typeof e !== 'boolean') return fail('e (has examples) is not a boolean');
+  const m = r.m === undefined && src.module ? src.module : str('m');
+  if (!m) fail('no module');
+  const files = (holders.get(name) ?? []).sort();
+  if (!files.length) fail('no module file');
+  return {
+    n: name, v: str('v'), c: str('c'), e, m,
+    p: !src.perms ? 0 : typeof r.p === 'number' ? r.p : fail('p (permission count) is not a number'),
+    x: src.extra ? str(src.extra.field) : '',
+    f: files.includes(m) ? m : files[0], // prefer the file named after the row's own module
+    desc: descriptions[name] ?? '',
   };
 }
 
 /** Write a source's normalized module files to public/data/<source>/ and return its rows, sorted by name. */
-async function loadRows(src: SourceDef, out: string): Promise<{ version: string | null; rows: Row[] }> {
+async function loadRows(src: SourceDef, out: string): Promise<{ version: string; rows: Row[] }> {
   const dir = join(DATA, src.id);
   const manifest = await readJson<Manifest>(join(dir, 'manifest.json'));
   const descriptions = await readJson<Record<string, string>>(join(dir, 'descriptions.json'));
@@ -83,23 +113,10 @@ async function loadRows(src: SourceDef, out: string): Promise<{ version: string 
     }
     await writeFile(join(out, f), JSON.stringify(file));
   }
-  const rows = manifest.d.map((r): Row => {
-    const files = (holders.get(r.n) ?? []).sort();
-    const m = r.m ?? src.module ?? '';
-    return {
-      n: r.n, v: r.v, c: r.c, e: r.e, m,
-      desc: descriptions[r.n] ?? '',
-      p: r.p ?? 0, // only Graph and Entra record permission counts
-      x: src.extra ? String(r[src.extra.field] ?? '') : '',
-      f: files.includes(m) ? m : files[0] ?? '', // prefer the file named after the row's own module
-    };
-  });
-  const checks: [string, (r: Row) => boolean][] = [['module', (r) => !r.m], ['module file', (r) => !r.f]];
-  for (const [what, bad] of checks) {
-    const missing = rows.filter(bad).map((r) => r.n);
-    if (missing.length) throw new Error(`${src.id}: ${missing.length} cmdlets have no ${what} (e.g. ${missing.slice(0, 3).join(', ')})`);
-  }
-  return { version: manifest.v, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
+  if (!Array.isArray(manifest.d)) throw new Error(`${src.id} manifest: d is not a list`);
+  if (manifest.v !== null && typeof manifest.v !== 'string') throw new Error(`${src.id} manifest: v is not a string or null`);
+  const rows = manifest.d.map((r) => parseManifestRow(src, r, holders, descriptions));
+  return { version: manifest.v ?? '', rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
 }
 
 function interner() {
@@ -108,7 +125,6 @@ function interner() {
   return {
     list,
     id(v: string) {
-      if (typeof v !== 'string') throw new Error('missing value for an index column');
       let i = map.get(v);
       if (i === undefined) { i = list.length; list.push(v); map.set(v, i); }
       return i;
@@ -164,7 +180,7 @@ async function main() {
     await writeFile(join(OUT_IDX, `${src.id}.desc.json`), JSON.stringify(desc));
     const { id, label, short, color, sample } = src;
     const extra = src.extra && { label: src.extra.label, ...(src.extra.warn && { warn: src.extra.warn }) };
-    sources.push({ id, label, short, color, sample, extra, count: rows.length, version: version ?? '' });
+    sources.push({ id, label, short, color, sample, extra, count: rows.length, version });
     console.log(`  ${src.id.padEnd(9)} ${String(rows.length).padStart(6)} cmdlets`);
   }
   const total = sources.reduce((a, s) => a + s.count, 0);

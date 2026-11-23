@@ -36,7 +36,7 @@ export interface DocumentedParam {
   name: string;
   type: string;
   required: boolean;
-  description?: string;
+  description: string; // '' when undocumented
 }
 
 /** A cmdlet's detail as scripts/build-index.ts writes it: every field present ('' / [] when the docs have none). */

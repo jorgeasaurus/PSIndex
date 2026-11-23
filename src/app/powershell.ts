@@ -90,7 +90,7 @@ function paramsOf(group: string): Param[] {
     const type = m[4] ?? m[5];
     const positional = m[1] === '[' && m[3] === ']' && type !== undefined;
     const optional = group.startsWith('[') && !(positional && group.startsWith('[-'));
-    return { name: m[2], type: type ?? 'Switch', required: !optional, positional };
+    return { name: m[2], type: type ?? 'Switch', required: !optional, positional, description: '' };
   });
 }
 

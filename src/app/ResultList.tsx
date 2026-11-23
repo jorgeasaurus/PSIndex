@@ -95,8 +95,6 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
     return () => { live = false; };
   }, [client, refs, range]);
 
-  if (refs && refs.length === 0) return <div class="results results-empty">{empty}</div>;
-
   const items = [];
   for (let i = range.start; refs && i < Math.min(refs.length, range.end); i++) {
     const r = rows.get(refs[i]);
@@ -105,9 +103,12 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
       : <SkeletonRow key={refs[i]} i={i} />);
   }
 
+  // One scroller for every state (loading, empty, results), so the ResizeObserver set up at mount
+  // always watches the element on screen.
+  const none = refs?.length === 0;
   return (
-    <div class="results" ref={scroller} onScroll={measure} id="results" role="listbox" aria-label="Search results" aria-busy={!refs}>
-      {refs ? <div class="results-inner" style={{ height: `${refs.length * ROW_H}px` }}>{items}</div> : <SkeletonRows />}
+    <div class={'results' + (none ? ' results-empty' : '')} ref={scroller} onScroll={measure} id="results" role={none ? undefined : 'listbox'} aria-label="Search results" aria-busy={!refs}>
+      {!refs ? <SkeletonRows /> : none ? empty : <div class="results-inner" style={{ height: `${refs.length * ROW_H}px` }}>{items}</div>}
     </div>
   );
 }
