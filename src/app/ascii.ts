@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef } from 'preact/hooks';
+import type { RefObject } from 'preact';
 import type { Theme } from './theme';
 
 // Animated ASCII density field drawn on a fixed canvas behind the UI.
@@ -29,6 +31,7 @@ export class AsciiField {
   private glyphW = 0;
   private running = false;
   private quiet: DOMRect[] = [];
+  private listeners = new AbortController();
 
   /** `quietSelector` marks elements the field steps back from, so text over it stays clean. */
   constructor(private canvas: HTMLCanvasElement, private quietSelector = '[data-quiet]') {
@@ -37,16 +40,23 @@ export class AsciiField {
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.resize = this.resize.bind(this);
     this.frame = this.frame.bind(this);
-    addEventListener('resize', this.resize, { passive: true });
-    addEventListener('pointermove', (e: PointerEvent) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; }, { passive: true });
-    document.addEventListener('visibilitychange', () => (document.hidden ? this.stop() : this.start()));
+    const opts = { passive: true, signal: this.listeners.signal };
+    addEventListener('resize', this.resize, opts);
+    addEventListener('pointermove', (e: PointerEvent) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; }, opts);
+    document.addEventListener('visibilitychange', () => (document.hidden ? this.stop() : this.start()), opts);
     matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
       this.reduced = e.matches;
       this.reduced ? (this.stop(), this.draw(performance.now())) : this.start();
-    });
+    }, opts);
     this.resize();
     // Web fonts change both the glyphs and the layout of the quiet zones.
     document.fonts?.ready.then(() => this.resize());
+  }
+
+  /** Stop drawing and remove every listener. */
+  dispose() {
+    this.stop();
+    this.listeners.abort();
   }
 
   /** Tint the field with a source colour, for the current theme (darker glyphs on the light ground). */
@@ -179,3 +189,20 @@ function scaleHex(hex: string, k: number) {
   const n = parseInt(hex.slice(1), 16);
   return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * k).toString(16).padStart(2, '0')).join('');
 }
+
+/**
+ * Run the field on `canvas` for the component's lifetime, tinted with `color` for `theme`.
+ * Returns `pulseAt(rect)`, which sends a ripple from the given box's left/centre.
+ */
+export function useAsciiField(canvas: RefObject<HTMLCanvasElement | null>, color: string, theme: Theme) {
+  const field = useRef<AsciiField | null>(null);
+  useEffect(() => {
+    const f = new AsciiField(canvas.current!);
+    field.current = f;
+    f.start();
+    return () => f.dispose();
+  }, []);
+  useEffect(() => field.current?.setTone(color, theme), [color, theme]);
+  return useCallback((at: { x: number; y: number }, amp = 1) => field.current?.pulse(at.x, at.y, amp), []);
+}
+

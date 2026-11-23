@@ -7,9 +7,8 @@
     "dev": "npm run index && astro dev",
     "build": "npm run index && astro build",
     "preview": "astro preview",
-    "check": "astro check",
     "test:e2e": "node tests/e2e.cjs",
-    "typecheck": "npm run index && tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@astrojs/preact": "^6.1.6",
@@ -22,6 +21,7 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "playwright": "1.63.0"
+    "playwright": "1.63.0",
+    "typescript": "6.0.2"
   }
 }

@@ -3,7 +3,7 @@
 parse_docs.py - Parse MECM/SCCM PowerShell documentation markdown files and
 generate JSON data files for MecmIndex.
 
-Usage: python3 scripts/parse_docs.py [docs_dir]
+Usage: bash pipelines/refresh.sh mecm   (writes data/mecm/ via $PSINDEX_OUT)
 
 docs_dir defaults to ./docs and should contain sccm-ps/ConfigurationManager/
 """
@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-from common import source_dir
+from common import output_dir
 
 NOUN_CATEGORIES = [
     ('AppV', 'Application Management'),
@@ -349,7 +349,7 @@ def main():
         }
 
     # Output directory
-    out_dir = source_dir('mecm')
+    out_dir = output_dir()
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 

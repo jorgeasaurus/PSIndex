@@ -3,12 +3,12 @@
 parse_docs.py -- Parse office-docs-powershell to generate ExchIndex data files.
 
 Usage:
-    python scripts/parse_docs.py <path-to-office-docs-powershell>
+    bash pipelines/refresh.sh exchange   (writes data/exchange/ via $PSINDEX_OUT)
 
 Output:
-    public/data/manifest.json
-    public/data/descriptions.json
-    public/data/modules/{Module}.json
+    $PSINDEX_OUT/manifest.json
+    $PSINDEX_OUT/descriptions.json
+    $PSINDEX_OUT/modules/{Module}.json
 """
 
 import os
@@ -19,7 +19,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-from common import keep_previous_versions, source_dir
+from common import keep_previous_versions, output_dir
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -193,13 +193,13 @@ def main():
         sys.exit(1)
 
     docs_root = Path(sys.argv[1])
-    out_dir = source_dir('exchange')
+    out_dir = output_dir()
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 
     print("Fetching module versions from PowerShell Gallery...")
     module_versions = fetch_module_versions()
-    keep_previous_versions(module_versions, MODULE_PACKAGE_MAP, out_dir)
+    keep_previous_versions(module_versions, MODULE_PACKAGE_MAP, 'exchange')
     primary_version = module_versions.get('ExchangePowerShell')
 
     manifest_entries = []

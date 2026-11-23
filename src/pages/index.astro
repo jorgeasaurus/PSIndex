@@ -1,12 +1,11 @@
 ---
 import '../styles/global.css';
 import App from '../app/App';
-import { SOURCES, SOURCE_LABELS, TOTAL, assetUrl } from '../app/sources';
+import { SOURCES, SOURCE_LABELS, TOTAL, assetUrl, formatCount } from '../app/sources';
 import { THEME_KEY } from '../app/theme';
 
-const fmt = new Intl.NumberFormat('en-US');
 const title = 'PSIndex — PowerShell cmdlet search for Microsoft 365 and Azure';
-const description = `Search ${fmt.format(TOTAL)} ${SOURCE_LABELS} cmdlets in one place.`;
+const description = `Search ${formatCount(TOTAL)} ${SOURCE_LABELS} cmdlets in one place.`;
 ---
 <!doctype html>
 <html lang="en">

@@ -86,6 +86,15 @@ async function run(browser) {
   check(u.get('s') === 'az' && u.get('verb') === 'Remove' && !u.get('ver'), 'source switch keeps verb, drops API filter', u.toString());
   check((await p.locator('.result .result-name').first().textContent()).startsWith('Remove-Az'), 'verb filter applies to the new source');
 
+  // Filters round-trip through the URL; Reset clears them but keeps the source.
+  await p.goto(`${BASE}/?s=graph&verb=Get&ex=1`);
+  await rowsReady(p);
+  await p.click('button[aria-controls=filters]');
+  check((await p.inputValue('.filters select >> nth=0')) === 'Get' && (await p.isChecked('.filters input[type=checkbox]')), 'filters restored from the URL');
+  await p.click('.filters .link-btn');
+  await p.waitForFunction(() => location.search === '?s=graph');
+  check(param(p, 's') === 'graph' && !param(p, 'verb') && !param(p, 'ex'), 'Reset clears filters, keeps the source', new URL(p.url()).search);
+
   // Scrolling deep through "All" never leaves the viewport as skeletons.
   await p.goto(BASE);
   await rowsReady(p);

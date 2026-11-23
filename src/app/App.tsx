@@ -1,16 +1,13 @@
+import { createRef } from 'preact';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { SearchClient } from './client';
-import { AsciiField } from './ascii';
+import { useAsciiField } from './ascii';
 import { effectiveTheme, readTheme, writeTheme, type Theme } from './theme';
 import { ResultList, ResultsSkeleton } from './ResultList';
 import { Detail } from './Detail';
-import { Band, EmptyState, FilterBar, Frame, Intro, LoadFailed, Toolbar } from './chrome';
-import { ALL, parseScope, scopeOf } from './sources';
-import type { Facets, Filters, Row } from './types';
-
-const EMPTY_FILTERS: Filters = { source: ALL.id, verb: '', module: '', category: '', extra: '', examples: false };
-const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] };
-const fmt = new Intl.NumberFormat('en-US');
+import { Band, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
+import { ALL, formatCount, parseScope, scopeOf } from './sources';
+import type { Facets, Filters, Results, Row } from './types';
 
 /**
  * Server-rendered and first paint: the static frame. Once mounted in the browser the search
@@ -27,32 +24,44 @@ function Shell() {
     <Frame
       source={ALL.id}
       isOpen={false}
-      band={<Band q="" source={ALL.id} placeholder={ALL.placeholder} />}
-      toolbar={<Toolbar label="Loading index…" filterCount={0} showFilters={false} />}
+      canvasRef={createRef()}
+      detailRef={createRef()}
+      band={<Band q="" source={ALL.id} placeholder={ALL.placeholder} inputRef={createRef()} handlers={INERT_BAND} />}
+      toolbar={<Toolbar label="Loading index…" filterCount={0} showFilters={false} onToggleFilters={() => {}} />}
       results={<ResultsSkeleton />}
-      detail={<Intro />}
+      detail={<Intro onPick={() => {}} />}
     />
   );
 }
+
+// ---- URL state -----------------------------------------------------------------------------
+
+const EMPTY_FILTERS: Filters = { source: ALL.id, verb: '', module: '', category: '', extra: '', examples: false };
+const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] };
+
+/** Each filter's URL parameter. */
+const PARAMS: Record<keyof Filters, string> = { source: 's', verb: 'verb', module: 'module', category: 'cat', extra: 'ver', examples: 'ex' };
+
+/** Filters narrowing the results within the chosen source (the source itself is shown by the tabs). */
+const activeFilters = (f: Filters) => (Object.keys(f) as (keyof Filters)[]).filter((k) => k !== 'source' && f[k] !== EMPTY_FILTERS[k]).length;
 
 /** The entry in the detail pane: its key (from a click or a link) and, once resolved, its row. */
 interface Open { key: string; row: Row | null }
 const CLOSED: Open = { key: '', row: null };
 
-interface UrlState { q: string; filters: Filters; open: Open }
-
-function readUrl(): UrlState {
+function readUrl(): { q: string; filters: Filters; open: Open } {
   const p = new URLSearchParams(location.search);
+  const text = (k: Exclude<keyof Filters, 'examples'>) => p.get(PARAMS[k]) ?? '';
   return {
     q: p.get('q') ?? '',
     open: { key: p.get('c') ?? '', row: null },
     filters: {
-      source: parseScope(p.get('s')),
-      verb: p.get('verb') ?? '',
-      module: p.get('module') ?? '',
-      category: p.get('cat') ?? '',
-      extra: p.get('ver') ?? '',
-      examples: p.get('ex') === '1',
+      source: parseScope(p.get(PARAMS.source)),
+      verb: text('verb'),
+      module: text('module'),
+      category: text('category'),
+      extra: text('extra'),
+      examples: p.get(PARAMS.examples) === '1',
     },
   };
 }
@@ -60,53 +69,35 @@ function readUrl(): UrlState {
 function writeUrl(q: string, f: Filters, open: string) {
   const p = new URLSearchParams();
   if (q) p.set('q', q);
-  if (f.source !== EMPTY_FILTERS.source) p.set('s', f.source);
-  if (f.verb) p.set('verb', f.verb);
-  if (f.module) p.set('module', f.module);
-  if (f.category) p.set('cat', f.category);
-  if (f.extra) p.set('ver', f.extra);
-  if (f.examples) p.set('ex', '1');
+  for (const k of Object.keys(PARAMS) as (keyof Filters)[]) {
+    if (f[k] !== EMPTY_FILTERS[k]) p.set(PARAMS[k], f[k] === true ? '1' : String(f[k]));
+  }
   if (open) p.set('c', open);
   const qs = p.toString();
   const url = location.pathname + (qs ? '?' + qs : '');
   if (url !== location.pathname + location.search) history.replaceState(null, '', url);
 }
 
-const sameFilters = (a: Filters, b: Filters) => (Object.keys(a) as (keyof Filters)[]).every((k) => a[k] === b[k]);
-
-let measureCtx: CanvasRenderingContext2D | null = null;
-/** Width of `text` in `el`'s font, for placing the search ripple at the caret. */
-function textWidth(el: HTMLElement, text: string) {
-  measureCtx ??= document.createElement('canvas').getContext('2d')!;
-  measureCtx.font = getComputedStyle(el).font;
-  return measureCtx.measureText(text).width;
-}
+// ---- Search session ------------------------------------------------------------------------
 
 function Search() {
   const [initial] = useState(readUrl);
   const [q, setQ] = useState(initial.q);
   const [filters, setFilters] = useState(initial.filters);
   const [open, setOpen] = useState(initial.open);
-  const [refs, setRefs] = useState<Int32Array | null>(null);
-  const [facets, setFacets] = useState<Facets>(NO_FACETS);
-  const [ms, setMs] = useState(0);
+  const [results, setResults] = useState<Results | null>(null);
   const [active, setActive] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [theme, setTheme] = useState<Theme | null>(readTheme); // null = follow the OS
   const [loadError, setLoadError] = useState('');
-  const [client] = useState(() => new SearchClient({
-    onResults: (r) => { setRefs(r.refs); setFacets(r.facets); setMs(r.ms); },
-    onLoadError: setLoadError,
-  }));
+  const [client] = useState(() => new SearchClient({ onResults: setResults, onLoadError: setLoadError }));
 
-  const field = useRef<AsciiField | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    field.current = new AsciiField(canvasRef.current!);
-    field.current.start();
-  }, []);
+  const detailRef = useRef<HTMLElement>(null);
+  const scope = scopeOf(filters.source);
+  const pulse = useAsciiField(canvasRef, scope.color, effectiveTheme(theme));
+  const refs = results?.refs ?? null;
 
   useEffect(() => {
     client.search(q, filters);
@@ -123,12 +114,6 @@ function Search() {
     return () => { live = false; };
   }, [open]);
 
-  // Field tint follows the source and theme; keep the active tab visible on narrow screens.
-  useEffect(() => {
-    field.current?.setTone(scopeOf(filters.source).color, effectiveTheme(theme));
-    document.querySelector('.source.is-on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [filters.source, theme]);
-
   // Global keys: "/" or Ctrl/Cmd+K focuses search.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,23 +128,15 @@ function Search() {
     return () => removeEventListener('keydown', onKey);
   }, []);
 
-  const query = (value: string) => {
-    setQ(value);
-    const el = inputRef.current!;
-    const r = el.getBoundingClientRect();
-    const caret = Math.min(r.right - 24, r.left + parseFloat(getComputedStyle(el).paddingLeft) + textWidth(el, value));
-    field.current?.pulse(caret, r.top + r.height / 2, 1);
-  };
-
   const setFilter = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
-  // Verb and the examples flag mean the same in every source, so they carry over; module, category and extra don't.
-  const setSource = (s: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source: s, verb: f.verb, examples: f.examples }));
+  // Verb and the examples flag mean the same in every source, so they survive a source switch.
+  const setSource = (source: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source, verb: f.verb, examples: f.examples }));
 
   const openRow = useCallback((row: Row) => {
     setOpen({ key: row.key, row });
     // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
-    const pane = document.querySelector('.pane-detail')?.getBoundingClientRect();
-    if (pane?.width) field.current?.pulse(pane.left + 40, pane.top + 40, 0.7);
+    const pane = detailRef.current?.getBoundingClientRect();
+    if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
   }, []);
   const close = useCallback(() => setOpen(CLOSED), []);
 
@@ -183,38 +160,40 @@ function Search() {
     setTheme(next);
   };
 
-  const scope = scopeOf(filters.source);
-  const filterCount = [filters.verb, filters.module, filters.category, filters.extra, filters.examples].filter(Boolean).length;
+  const filterCount = activeFilters(filters);
   const countLabel = loadError
     ? 'Index unavailable'
-    : refs == null
+    : !results
       ? 'Loading index…'
-      : <>{fmt.format(refs.length)} {refs.length === 1 ? 'result' : 'results'}{q ? <span class="ms"> · {ms < 1 ? '<1' : Math.round(ms)} ms</span> : null}</>;
+      : <>{formatCount(results.refs.length)} {results.refs.length === 1 ? 'result' : 'results'}{q ? <span class="ms"> · {results.ms < 1 ? '<1' : Math.round(results.ms)} ms</span> : null}</>;
 
   return (
     <Frame
       source={filters.source}
       isOpen={!!open.key}
       canvasRef={canvasRef}
+      detailRef={detailRef}
       band={
         <Band
           q={q}
           source={filters.source}
           placeholder={scope.placeholder}
           inputRef={inputRef}
-          onQuery={query}
-          onKeyDown={onKeyDown}
-          onClear={() => { setQ(''); inputRef.current?.focus(); }}
-          onHome={() => { setQ(''); setFilters(EMPTY_FILTERS); close(); }}
-          onToggleTheme={toggleTheme}
-          onPickSource={setSource}
+          handlers={{
+            onQuery: (value, caret) => { setQ(value); pulse(caret); },
+            onKeyDown,
+            onClear: () => { setQ(''); inputRef.current?.focus(); },
+            onHome: () => { setQ(''); setFilters(EMPTY_FILTERS); close(); },
+            onToggleTheme: toggleTheme,
+            onPickSource: setSource,
+          }}
         />
       }
       toolbar={
         <>
           <Toolbar label={countLabel} filterCount={filterCount} showFilters={showFilters} onToggleFilters={() => setShowFilters((s) => !s)} />
           {showFilters && (
-            <FilterBar facets={facets} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={() => setFilters((f) => ({ ...EMPTY_FILTERS, source: f.source }))} />
+            <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={() => setFilters({ ...EMPTY_FILTERS, source: filters.source })} />
           )}
         </>
       }
@@ -228,7 +207,7 @@ function Search() {
             openKey={open.key}
             onOpen={openRow}
             query={q}
-            empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={!sameFilters(filters, EMPTY_FILTERS)} reset={() => setFilters(EMPTY_FILTERS)} />}
+            empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => setFilters(EMPTY_FILTERS)} />}
           />
         )
       }

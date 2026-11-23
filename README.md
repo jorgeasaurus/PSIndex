@@ -40,7 +40,7 @@ dist/                 static site, deployed by Vercel on every push to main
 npm install
 npm run dev        # builds the index, then starts Astro on http://localhost:4321
 npm run build      # index + static build into dist/
-npm run typecheck  # index + tsc
+npm run typecheck  # tsc (run after build or index, which generates src/sources.generated.json)
 npm run test:e2e   # browser checks against the built site (needs Playwright + Chromium)
 ```
 

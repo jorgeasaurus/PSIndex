@@ -3,11 +3,11 @@
 
 Reads cmdlet docs from a local clone of MicrosoftDocs/entra-powershell-docs
 and produces:
-  - public/data/manifest.json   (lightweight summary for all cmdlets)
-  - public/data/modules/*.json  (per-module detail, loaded lazily)
+  - $PSINDEX_OUT/manifest.json   (lightweight summary for all cmdlets)
+  - $PSINDEX_OUT/modules/*.json  (per-module detail, loaded lazily)
 
 Usage:
-    python3 scripts/parse_docs.py [docs_dir]
+    bash pipelines/refresh.sh entra   (writes data/entra/ via $PSINDEX_OUT)
 
 docs_dir defaults to ./docs and should point to the directory containing
 v1.0/ and beta/ subdirectories.
@@ -22,7 +22,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from common import keep_previous_versions, source_dir
+from common import keep_previous_versions, output_dir
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -291,7 +291,7 @@ def main():
         print(f"Error: docs directory not found: {docs_dir}", file=sys.stderr)
         sys.exit(1)
 
-    data_dir = source_dir("entra")
+    data_dir = output_dir()
     modules_dir = data_dir / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
@@ -313,7 +313,7 @@ def main():
     # Fetch module versions from PowerShell Gallery
     unique_modules = sorted(set(c["module"] for c in all_cmdlets))
     module_versions = fetch_all_module_versions(unique_modules)
-    keep_previous_versions(module_versions, unique_modules, data_dir)
+    keep_previous_versions(module_versions, unique_modules, "entra")
 
     # Build slim manifest (short keys, no descriptions or moduleVersion)
     DEFAULT_DESC = "Microsoft Entra PowerShell cmdlet."

@@ -68,9 +68,6 @@ async function loadRows(src, out) {
   return { version: manifest.v, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
 }
 
-/** Pipelines write null, or '0.0.0' (Az's parser), when a version is unknown; the app sees ''. */
-const knownVersion = (v) => (v && v !== '0.0.0' ? v : '');
-
 function interner() {
   const list = [];
   const map = new Map();
@@ -131,7 +128,7 @@ async function main() {
     await writeFile(join(OUT_IDX, `${src.id}.json`), JSON.stringify(index));
     await writeFile(join(OUT_IDX, `${src.id}.desc.json`), JSON.stringify(desc));
     const extra = src.extra && { label: src.extra.label, ...(src.extra.warn && { warn: src.extra.warn }) };
-    sources.push({ ...src, extra, count: rows.length, version: knownVersion(version) });
+    sources.push({ ...src, extra, count: rows.length, version: version ?? '' });
     console.log(`  ${src.id.padEnd(9)} ${String(rows.length).padStart(6)} cmdlets`);
   }
   const total = sources.reduce((a, s) => a + s.count, 0);

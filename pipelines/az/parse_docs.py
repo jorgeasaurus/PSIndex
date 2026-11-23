@@ -3,12 +3,12 @@
 parse_docs.py — Parse azure-docs-powershell to generate AzIndex data files.
 
 Usage:
-    python scripts/parse_docs.py <path-to-azure-docs-powershell>
+    bash pipelines/refresh.sh az   (writes data/az/ via $PSINDEX_OUT)
 
 Output:
-    public/data/manifest.json
-    public/data/descriptions.json
-    public/data/modules/Az.<Module>.json
+    $PSINDEX_OUT/manifest.json
+    $PSINDEX_OUT/descriptions.json
+    $PSINDEX_OUT/modules/Az.<Module>.json
 """
 
 import os
@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import source_dir
+from common import output_dir
 
 # ── Category mapping ──────────────────────────────────────────────────────────
 CATEGORY_MAP = [
@@ -193,14 +193,14 @@ def main():
         sys.exit(1)
 
     docs_root = sys.argv[1]
-    out_dir = source_dir('az')
+    out_dir = output_dir()
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Scanning {docs_root} ...")
     azps_dir = find_latest_azps_dir(docs_root)
     version_str = re.search(r'azps-(\d+\.\d+\.\d+)', azps_dir.name)
-    version = version_str.group(1) if version_str else '0.0.0'
+    version = version_str.group(1) if version_str else None
     print(f"Found: {azps_dir.name}  (version {version})")
 
     manifest_entries = []
@@ -224,7 +224,7 @@ def main():
         if not mod_dir.name.startswith('Az.'):
             continue
         module_name = mod_dir.name
-        mod_version = module_version_map.get(module_name, '0.0.0')
+        mod_version = module_version_map.get(module_name)
         category = get_category(module_name)
         module_cmdlets = {}
 

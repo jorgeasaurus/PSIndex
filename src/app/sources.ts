@@ -6,6 +6,8 @@ export const SOURCES: SourceMeta[] = generated.sources;
 export const TOTAL = generated.total;
 
 const fmt = new Intl.NumberFormat('en-US');
+/** "40,931" — the one number format the site uses. */
+export const formatCount = (n: number) => fmt.format(n);
 const list = new Intl.ListFormat('en', { type: 'conjunction' });
 
 /** "Graph, Az, Entra, Exchange, and MECM" — for copy that names every source. */
@@ -44,7 +46,7 @@ export interface Scope {
 export const ALL: Scope = {
   id: 'all',
   color: '#b9c3d6',
-  placeholder: `Search ${fmt.format(TOTAL)} cmdlets`,
+  placeholder: `Search ${formatCount(TOTAL)} cmdlets`,
   inLabel: '',
   extraLabel: null,
   sources: SOURCES,
@@ -56,7 +58,7 @@ const SCOPES = new Map<SourceId, Scope>([
   ...SOURCES.map((s): [SourceId, Scope] => [s.id, {
     id: s.id,
     color: s.color,
-    placeholder: `Search ${fmt.format(s.count)} ${s.short} cmdlets`,
+    placeholder: `Search ${formatCount(s.count)} ${s.short} cmdlets`,
     inLabel: ` in ${s.short}`,
     extraLabel: s.extra?.label ?? null,
     sources: [s],

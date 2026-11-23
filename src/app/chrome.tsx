@@ -1,17 +1,17 @@
 // Presentational pieces of the page. No state: App.tsx renders them statically on the server
 // (Shell) and wires them to the search session in the browser (Search).
 import type { ComponentChildren, Ref } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
-import { ALL, SOURCES, SOURCE_NAMES, TOTAL, srcStyle } from './sources';
+import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, srcStyle } from './sources';
 import type { Facets, Filters, SourceId } from './types';
 
-const fmt = new Intl.NumberFormat('en-US');
-
 /** Page layout: band, results pane, detail pane, over the background canvas. */
-export function Frame({ source, isOpen, canvasRef, band, toolbar, results, detail }: {
+export function Frame({ source, isOpen, canvasRef, detailRef, band, toolbar, results, detail }: {
   source: SourceId;
   isOpen: boolean;
-  canvasRef?: Ref<HTMLCanvasElement>;
+  canvasRef: Ref<HTMLCanvasElement>;
+  detailRef: Ref<HTMLElement>;
   band: ComponentChildren;
   toolbar: ComponentChildren;
   results: ComponentChildren;
@@ -23,30 +23,49 @@ export function Frame({ source, isOpen, canvasRef, band, toolbar, results, detai
       {band}
       <main class="work">
         <section class="pane pane-results" aria-label="Results">{toolbar}{results}</section>
-        <section class="pane pane-detail" aria-label="Details">{detail}</section>
+        <section class="pane pane-detail" aria-label="Details" ref={detailRef}>{detail}</section>
       </main>
     </div>
   );
 }
 
-export interface BandProps {
+export interface BandHandlers {
+  /** New query text, and the point just after the caret (for the field's ripple). */
+  onQuery: (q: string, caret: { x: number; y: number }) => void;
+  onKeyDown: (e: KeyboardEvent) => void;
+  onClear: () => void;
+  onHome: () => void;
+  onToggleTheme: () => void;
+  onPickSource: (s: SourceId) => void;
+}
+
+/** For the static server render, where nothing is interactive yet. */
+export const INERT_BAND: BandHandlers = {
+  onQuery() {}, onKeyDown() {}, onClear() {}, onHome() {}, onToggleTheme() {}, onPickSource() {},
+};
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+/** Screen point just after the text in a search input. */
+function caretPoint(el: HTMLInputElement) {
+  measureCtx ??= document.createElement('canvas').getContext('2d')!;
+  measureCtx.font = getComputedStyle(el).font;
+  const r = el.getBoundingClientRect();
+  const x = r.left + parseFloat(getComputedStyle(el).paddingLeft) + measureCtx.measureText(el.value).width;
+  return { x: Math.min(r.right - 24, x), y: r.top + r.height / 2 };
+}
+
+export function Band({ q, source, placeholder, inputRef, handlers }: {
   q: string;
   source: SourceId;
   placeholder: string;
-  inputRef?: Ref<HTMLInputElement>;
-  onQuery?: (q: string) => void;
-  onKeyDown?: (e: KeyboardEvent) => void;
-  onClear?: () => void;
-  onHome?: () => void;
-  onToggleTheme?: () => void;
-  onPickSource?: (s: SourceId) => void;
-}
-
-export function Band({ q, source, placeholder, inputRef, onQuery, onKeyDown, onClear, onHome, onToggleTheme, onPickSource }: BandProps) {
+  inputRef: Ref<HTMLInputElement>;
+  handlers: BandHandlers;
+}) {
+  const { onQuery, onKeyDown, onClear, onHome, onToggleTheme, onPickSource } = handlers;
   return (
     <header class="band">
       <div class="band-top">
-        <a class="wordmark" data-quiet href="/" aria-label="PSIndex home" onClick={(e) => { if (onHome) { e.preventDefault(); onHome(); } }}>
+        <a class="wordmark" data-quiet href="/" aria-label="PSIndex home" onClick={(e) => { e.preventDefault(); onHome(); }}>
           <span class="wordmark-ps">PS</span>Index
         </a>
         <p class="tagline" data-quiet>PowerShell cmdlets for {SOURCE_NAMES}. One index.</p>
@@ -70,7 +89,7 @@ export function Band({ q, source, placeholder, inputRef, onQuery, onKeyDown, onC
           aria-label="Search cmdlets"
           aria-controls="results"
           placeholder={placeholder}
-          onInput={(e) => onQuery?.((e.target as HTMLInputElement).value)}
+          onInput={(e) => { const el = e.target as HTMLInputElement; onQuery(el.value, caretPoint(el)); }}
           onKeyDown={onKeyDown}
         />
         {q ? (
@@ -88,18 +107,21 @@ export function Band({ q, source, placeholder, inputRef, onQuery, onKeyDown, onC
   );
 }
 
-function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label: string; count: number; current: SourceId; onPick?: (s: SourceId) => void }) {
+function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label: string; count: number; current: SourceId; onPick: (s: SourceId) => void }) {
   const on = id === current;
+  const ref = useRef<HTMLButtonElement>(null);
+  // The tab strip scrolls sideways on narrow screens; keep the selected tab in view.
+  useEffect(() => { if (on) ref.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [on]);
   return (
-    <button type="button" class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick?.(id)}>
+    <button ref={ref} type="button" class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
       <span class="source-dot" aria-hidden="true" />
       {label}
-      <span class="source-n">{fmt.format(count)}</span>
+      <span class="source-n">{formatCount(count)}</span>
     </button>
   );
 }
 
-export function Toolbar({ label, filterCount, showFilters, onToggleFilters }: { label: ComponentChildren; filterCount: number; showFilters: boolean; onToggleFilters?: () => void }) {
+export function Toolbar({ label, filterCount, showFilters, onToggleFilters }: { label: ComponentChildren; filterCount: number; showFilters: boolean; onToggleFilters: () => void }) {
   return (
     <div class="toolbar">
       <span class="count" aria-live="polite">{label}</span>
@@ -164,17 +186,17 @@ export function LoadFailed({ message }: { message: string }) {
   );
 }
 
-export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void }) {
+export function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) {
   return (
     <div class="intro">
       <h2>Type a fragment. Get the command.</h2>
       <p class="intro-lede">
-        {fmt.format(TOTAL)} cmdlets from {SOURCES.length} Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
+        {formatCount(TOTAL)} cmdlets from {SOURCES.length} Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
       </p>
       <ul class="intro-samples" aria-label="Example searches">
         {SOURCES.map((s) => (
           <li key={s.id}>
-            <button type="button" style={srcStyle(s.id)} onClick={() => onPick?.(s.id, s.sample)}>
+            <button type="button" style={srcStyle(s.id)} onClick={() => onPick(s.id, s.sample)}>
               <span class="source-dot" aria-hidden="true" /><code>{s.sample}</code>
             </button>
           </li>
@@ -184,7 +206,7 @@ export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void })
         {SOURCES.map((s) => (
           <div key={s.id} style={srcStyle(s.id)}>
             <dt><span class="source-dot" aria-hidden="true" />{s.label}</dt>
-            <dd>{fmt.format(s.count)}{s.version ? <span> · v{s.version}</span> : null}</dd>
+            <dd>{formatCount(s.count)}{s.version ? <span> · v{s.version}</span> : null}</dd>
           </div>
         ))}
       </dl>
