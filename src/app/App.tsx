@@ -2,7 +2,7 @@ import { createRef } from 'preact';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { SearchClient } from './client';
 import { useAsciiField } from './ascii';
-import { effectiveTheme, readTheme, writeTheme, type Theme } from './theme';
+import { useTheme } from './theme';
 import { ResultList, ResultsSkeleton } from './ResultList';
 import { Detail } from './Detail';
 import { Band, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
@@ -24,6 +24,7 @@ function Shell() {
     <Frame
       source={ALL.id}
       isOpen={false}
+      inert
       canvasRef={createRef()}
       detailRef={createRef()}
       band={<Band q="" source={ALL.id} placeholder={ALL.placeholder} inputRef={createRef()} handlers={INERT_BAND} />}
@@ -88,7 +89,6 @@ function Search() {
   const [results, setResults] = useState<Results | null>(null);
   const [active, setActive] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
-  const [theme, setTheme] = useState<Theme | null>(readTheme); // null = follow the OS
   const [loadError, setLoadError] = useState('');
   const [client] = useState(() => new SearchClient({ onResults: setResults, onLoadError: setLoadError }));
 
@@ -96,7 +96,8 @@ function Search() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const scope = scopeOf(filters.source);
-  const pulse = useAsciiField(canvasRef, scope.color, effectiveTheme(theme));
+  const { theme, toggle: toggleTheme } = useTheme();
+  const pulse = useAsciiField(canvasRef, scope.color, theme);
   const refs = results?.refs ?? null;
 
   useEffect(() => {
@@ -154,12 +155,6 @@ function Search() {
     }
   };
 
-  const toggleTheme = () => {
-    const next: Theme = effectiveTheme(theme) === 'dark' ? 'light' : 'dark';
-    writeTheme(next);
-    setTheme(next);
-  };
-
   const filterCount = activeFilters(filters);
   const countLabel = loadError
     ? 'Index unavailable'
@@ -171,6 +166,7 @@ function Search() {
     <Frame
       source={filters.source}
       isOpen={!!open.key}
+      inert={false}
       canvasRef={canvasRef}
       detailRef={detailRef}
       band={

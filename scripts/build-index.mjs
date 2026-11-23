@@ -58,13 +58,15 @@ async function loadRows(src, out) {
   const rows = manifest.d.map((r) => {
     const files = (holders.get(r.n) ?? []).sort();
     return {
-      n: r.n, v: r.v, m: r.m, c: r.c, p: r.p, e: r.e, desc: descriptions[r.n],
+      n: r.n, v: r.v, c: r.c, e: r.e, desc: descriptions[r.n],
+      m: r.m ?? '', // MECM's manifest has no module field: it is one module
+      p: r.p ?? 0, // only Graph and Entra record permission counts
       x: src.extra ? r[src.extra.field] : '',
       f: files.includes(r.m) ? r.m : files[0], // prefer the file named after the row's own module
     };
   });
-  const missing = rows.filter((r) => !r.f).length;
-  if (missing) console.warn(`    ${missing} cmdlets have no detail file`);
+  const missing = rows.filter((r) => !r.f).map((r) => r.n);
+  if (missing.length) throw new Error(`${src.id}: ${missing.length} cmdlets have no module file (e.g. ${missing.slice(0, 3).join(', ')})`);
   return { version: manifest.v, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
 }
 
@@ -73,7 +75,8 @@ function interner() {
   const map = new Map();
   return {
     list,
-    id(v = '') {
+    id(v) {
+      if (v === undefined || v === null) throw new Error('missing value for an index column');
       let i = map.get(v);
       if (i === undefined) { i = list.length; list.push(v); map.set(v, i); }
       return i;
@@ -92,7 +95,7 @@ function buildShard(rows) {
     index.c.push(cats.id(r.c));
     index.f.push(files.id(r.f));
     index.x.push(extras.id(r.x));
-    index.p.push(r.p ?? 0);
+    index.p.push(r.p);
     index.e.push(r.e ? 1 : 0);
   }
   return { index, desc: rows.map((r) => clip(r.desc)) };

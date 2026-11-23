@@ -1,7 +1,7 @@
 ---
 import '../styles/global.css';
 import App from '../app/App';
-import { SOURCES, SOURCE_LABELS, TOTAL, assetUrl, formatCount } from '../app/sources';
+import { SOURCE_LABELS, TOTAL, formatCount } from '../app/sources';
 import { THEME_KEY } from '../app/theme';
 
 const title = 'PSIndex — PowerShell cmdlet search for Microsoft 365 and Azure';
@@ -20,7 +20,6 @@ const description = `Search ${formatCount(TOTAL)} ${SOURCE_LABELS} cmdlets in on
     <meta property="og:title" content="PSIndex" />
     <meta property="og:description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    {SOURCES.map((s) => <link rel="preload" href={assetUrl(`idx/${s.id}.json`)} as="fetch" crossorigin />)}
     <script is:inline define:vars={{ THEME_KEY }}>
       try { const t = localStorage.getItem(THEME_KEY); if (t) document.documentElement.dataset.theme = t; } catch {}
     </script>

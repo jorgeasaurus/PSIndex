@@ -63,6 +63,34 @@ async function run(browser) {
     await c2.close();
   }
 
+  // With no stored override, the background field follows the OS theme as it changes.
+  {
+    const c3 = await browser.newContext({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    const p3 = await c3.newPage();
+    await p3.goto(BASE);
+    await rowsReady(p3);
+    // Brightest glyph channel in the top band of the canvas: light theme draws darker glyphs.
+    const brightest = () => p3.evaluate(() => {
+      const c = document.querySelector('canvas.field');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, Math.min(c.height, 300)).data;
+      let max = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 100) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
+      return max;
+    });
+    const dark = await brightest();
+    await p3.emulateMedia({ colorScheme: 'light' });
+    await p3.waitForFunction((was) => {
+      const c = document.querySelector('canvas.field');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, Math.min(c.height, 300)).data;
+      let max = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 100) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
+      return max > 0 && max < was * 0.8;
+    }, dark, { timeout: 5000 }).then(() => true, () => false).then(async (ok) => {
+      check(ok, 'field re-tints when the OS theme changes', `brightest channel ${dark} -> ${await brightest()}`);
+    });
+    await c3.close();
+  }
+
   // The theme toggle applies and remembers an explicit theme.
   const before = await p.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   await p.click('button[aria-label="Toggle light or dark theme"]');
@@ -128,14 +156,14 @@ async function run(browser) {
   check(!errors.length, 'no page errors', errors.join('; '));
   await ctx.close();
 
-  // Each shard is fetched once (preload and worker share the URL), versioned by build.
+  // Each shard is fetched exactly once, at its build-versioned URL.
   ctx = await browser.newContext();
-  const graphUrls = new Set();
-  ctx.on('request', (r) => /\/idx\/graph\.json/.test(r.url()) && graphUrls.add(r.url()));
+  const graphReqs = [];
+  ctx.on('request', (r) => /\/idx\/graph\.json/.test(r.url()) && graphReqs.push(r.url()));
   p = await ctx.newPage();
   await p.goto(BASE);
   await rowsReady(p);
-  check(graphUrls.size === 1 && [...graphUrls][0].includes('?v='), 'shard requested at one versioned URL', [...graphUrls].join(', '));
+  check(graphReqs.length === 1 && graphReqs[0].includes('?v='), 'shard fetched once, versioned', graphReqs.join(', '));
   await ctx.close();
 
   // A failed shard surfaces an error instead of loading forever.
@@ -167,21 +195,26 @@ async function run(browser) {
   await ctx.route('**/idx/graph.json*', async (r) => { await new Promise((res) => setTimeout(res, 2000)); r.continue(); });
   p = await ctx.newPage();
   await p.goto(`${BASE}/?c=graph:Get-MgUser`);
-  await p.click('.wordmark'); // while the delayed shard keeps the lookup pending
+  // Wait for the interactive session (not the static server-rendered shell), then click Home
+  // while the delayed shard keeps the deep-link lookup pending.
+  await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+  await p.evaluate(() => { window.__sameDocument = true; });
+  await p.click('.wordmark');
   await rowsReady(p);
   // A search issued now is answered after the pending lookup (the worker replies in order).
   await p.fill('input[type=search]', 'get-mguser');
   await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent === 'Get-MgUser');
-  check(!param(p, 'c') && !(await p.locator('.detail-title').count()), 'dismissed deep link stays closed');
+  const sameDocument = await p.evaluate(() => window.__sameDocument === true);
+  check(sameDocument && !param(p, 'c') && !(await p.locator('.detail-title').count()), 'dismissed deep link stays closed', sameDocument ? '' : 'page navigated');
   await ctx.close();
 }
 
-// `astro preview` runs as a single background daemon: stop any running one, start ours, stop it after.
+// `astro preview --background` starts a single daemon and returns: stop any running one, start ours, stop it after.
 const astro = (...args) => new Promise((res) => spawn('npx', ['astro', 'preview', ...args], { stdio: 'ignore' }).on('exit', res));
 
 (async () => {
   await astro('stop');
-  await astro('--port', String(PORT));
+  await astro('--port', String(PORT), '--background');
   let browser;
   try {
     await waitForServer();

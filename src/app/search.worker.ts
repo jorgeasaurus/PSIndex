@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { SOURCES, assetUrl, queryTokens, scopeOf } from './sources';
-import type { Facets, Filters, FromWorker, IndexShard, Row, ToWorker } from './types';
+import type { Facets, Filters, FromWorker, IndexShard, RequestType, Requests, Row, ToWorker } from './types';
 
 const SHIFT = 20; // ref = (sourceIndex << SHIFT) | rowIndex
 const ROW_MASK = (1 << SHIFT) - 1;
@@ -75,7 +75,10 @@ async function load() {
 
   // Descriptions are bigger and only refine ranking; fetch them after the first result set is out.
   await Promise.all(loaded.map(loadDescriptions));
-  post({ type: 'desc-ready' }); // the client re-runs its latest search
+  // Descriptions refine matching and the rows' text: let the client drop its cached rows,
+  // then re-run the latest search under its own id so its results replace the current ones.
+  post({ type: 'desc-ready' });
+  if (lastSearch) runSearch(lastSearch);
 }
 
 function fuzzy(t: string, s: string): number {
@@ -214,16 +217,18 @@ function related(key: string): Row[] {
   return out.sort((a, b) => a.verb.localeCompare(b.verb));
 }
 
-function answer(m: Exclude<ToWorker, { type: 'search' }>) {
-  switch (m.type) {
-    case 'rows': return m.args.refs.map(rowOf);
-    case 'related': return related(m.args.key);
-    case 'find': {
-      const ref = refOfKey(m.args.key);
-      return ref === null ? null : rowOf(ref);
-    }
-  }
-}
+/** One handler per request; the compiler checks each reply against Requests in types.ts. */
+const handlers: { [K in RequestType]: (args: Requests[K]['args']) => Requests[K]['reply'] } = {
+  rows: ({ refs }) => refs.map(rowOf),
+  related: ({ key }) => related(key),
+  find: ({ key }) => {
+    const ref = refOfKey(key);
+    return ref === null ? null : rowOf(ref);
+  },
+};
+
+/** Dispatch a request to its handler. TypeScript can't correlate m.type with m.args across the union, hence the one cast. */
+const answer = (m: Exclude<ToWorker, { type: 'search' }>) => handlers[m.type](m.args as never);
 
 self.onmessage = (ev: MessageEvent<ToWorker>) => {
   const m = ev.data;

@@ -1,6 +1,8 @@
 import { assetUrl } from './sources';
 import type { CmdletFile, Filters, FromWorker, RequestType, Requests, Results, Row, ToWorker } from './types';
 
+type Reply = Requests[RequestType]['reply'];
+
 interface Handlers {
   onResults: (r: Results) => void;
   onLoadError: (message: string) => void;
@@ -14,10 +16,9 @@ export class SearchClient {
   private worker = new Worker(new URL('./search.worker.ts', import.meta.url), { type: 'module' });
   private seq = 0;
   private latestSearch = 0;
-  private pending = new Map<number, (reply: unknown) => void>();
+  private pending = new Map<number, (reply: Reply) => void>();
   private ready: Promise<void>;
   private rowCache = new Map<number, Row>();
-  private lastQuery: { q: string; filters: Filters } | null = null;
 
   constructor(h: Handlers) {
     let markReady!: () => void;
@@ -25,7 +26,7 @@ export class SearchClient {
     this.worker.onmessage = ({ data: m }: MessageEvent<FromWorker>) => {
       switch (m.type) {
         case 'ready': return markReady();
-        case 'desc-ready': return this.descriptionsArrived();
+        case 'desc-ready': return this.rowCache.clear(); // the worker re-sends the latest results next
         case 'load-error': return h.onLoadError(m.message);
         case 'results': if (m.id === this.latestSearch) h.onResults(m); return;
         case 'reply': this.pending.get(m.id)?.(m.reply); this.pending.delete(m.id); return;
@@ -34,7 +35,6 @@ export class SearchClient {
   }
 
   search(q: string, filters: Filters) {
-    this.lastQuery = { q, filters };
     this.latestSearch = ++this.seq;
     this.post({ type: 'search', id: this.latestSearch, q, filters });
   }
@@ -55,15 +55,6 @@ export class SearchClient {
     return refs.map((ref) => found.get(ref)!);
   }
 
-  /**
-   * Descriptions refine both matching and the rows' text, so cached rows are stale and the
-   * latest search is re-run: its fresh results re-render the list through onResults.
-   */
-  private descriptionsArrived() {
-    this.rowCache.clear();
-    if (this.lastQuery) this.search(this.lastQuery.q, this.lastQuery.filters);
-  }
-
   /** Ask the worker a question once its index has loaded. Rows go through `rows()` and its cache. */
   request<K extends Exclude<RequestType, 'rows'>>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
     return this.ask(type, args);
@@ -73,7 +64,8 @@ export class SearchClient {
     await this.ready;
     const id = ++this.seq;
     return new Promise((resolve) => {
-      this.pending.set(id, resolve as (reply: unknown) => void);
+      // The reply for `id` is Requests[K]['reply']; the map holds the union, so narrow here once.
+      this.pending.set(id, resolve as (reply: Reply) => void);
       this.post({ type, id, args } as ToWorker);
     });
   }

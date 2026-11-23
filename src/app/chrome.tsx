@@ -7,9 +7,11 @@ import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, srcStyle } from './sour
 import type { Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
-export function Frame({ source, isOpen, canvasRef, detailRef, band, toolbar, results, detail }: {
+export function Frame({ source, isOpen, inert, canvasRef, detailRef, band, toolbar, results, detail }: {
   source: SourceId;
   isOpen: boolean;
+  /** The static server-rendered frame, before the search session takes over. */
+  inert: boolean;
   canvasRef: Ref<HTMLCanvasElement>;
   detailRef: Ref<HTMLElement>;
   band: ComponentChildren;
@@ -18,7 +20,7 @@ export function Frame({ source, isOpen, canvasRef, detailRef, band, toolbar, res
   detail: ComponentChildren;
 }) {
   return (
-    <div class="app" style={srcStyle(source)} data-open={isOpen ? '' : undefined}>
+    <div class="app" style={srcStyle(source)} data-open={isOpen ? '' : undefined} aria-busy={inert || undefined}>
       <canvas ref={canvasRef} class="field" aria-hidden="true" />
       {band}
       <main class="work">
