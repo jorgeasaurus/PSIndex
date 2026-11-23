@@ -128,12 +128,18 @@ const scenarios = [
       await p.waitForFunction(() => document.querySelectorAll('.result:not(.result-skel)').length > 5);
       for (let k = 0; k < 4; k++) await p.keyboard.press('ArrowDown');
       const before = await p.textContent('.result.is-active .result-name');
+      const rowTop = () => p.evaluate(() => document.querySelector('.result.is-active')?.style.top);
+      const topBefore = await rowTop();
       const descArrived = p.waitForResponse(/graph\.desc\.json/);
       this.release();
       await descArrived;
       // The refresh can add description matches above the cursor; it must stay on the same cmdlet.
       await p.waitForFunction(() => [...document.querySelectorAll('.result .result-desc')].some((d) => d.textContent && !d.querySelector('.result-module')));
       const after = await p.textContent('.result.is-active .result-name');
+      const topAfter = await rowTop();
+      // Precondition: the refresh really moved the cursor's row. If the data stops re-ranking this
+      // query, say so rather than pass without testing anything.
+      check(topBefore !== topAfter, 'precondition: descriptions re-rank the cursor row', `row at ${topBefore} -> ${topAfter}; pick another query if this fails`);
       check(before && before === after, 'cursor stays on its cmdlet when descriptions re-rank the list', `${before} -> ${after}`);
     },
   },
