@@ -1,0 +1,32 @@
+---
+import '../styles/global.css';
+import App from '../app/App';
+import data from '../sources.generated.json';
+
+const fmt = new Intl.NumberFormat('en-US');
+const title = 'PSIndex — PowerShell cmdlet & Microsoft error code search';
+const description = `Search ${fmt.format(data.total)} Microsoft Graph, Az, Entra, Exchange and Configuration Manager cmdlets, plus Microsoft error codes, in one place.`;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#090c13" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#eef0f5" media="(prefers-color-scheme: light)" />
+    <meta property="og:title" content="PSIndex" />
+    <meta property="og:description" content={description} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/idx/graph.json" as="fetch" crossorigin />
+    <script is:inline>
+      try { const t = localStorage.getItem('psindex-theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+    </script>
+  </head>
+  <body>
+    <App client:load sources={data.sources} total={data.total} />
+    <noscript><p style="padding:24px">PSIndex searches in your browser and needs JavaScript.</p></noscript>
+  </body>
+</html>

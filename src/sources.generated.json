@@ -1,0 +1,58 @@
+{
+  "total": 43146,
+  "sources": [
+    {
+      "id": "graph",
+      "label": "Microsoft Graph",
+      "short": "Graph",
+      "kind": "cmdlet",
+      "learn": "module",
+      "count": 27327,
+      "version": ""
+    },
+    {
+      "id": "az",
+      "label": "Azure (Az)",
+      "short": "Az",
+      "kind": "cmdlet",
+      "learn": "module",
+      "count": 8819,
+      "version": "17.0.0"
+    },
+    {
+      "id": "entra",
+      "label": "Microsoft Entra",
+      "short": "Entra",
+      "kind": "cmdlet",
+      "learn": "module",
+      "count": 604,
+      "version": "1.3.0"
+    },
+    {
+      "id": "exchange",
+      "label": "Exchange, Teams & SharePoint",
+      "short": "Exchange",
+      "kind": "cmdlet",
+      "learn": "module",
+      "count": 2996,
+      "version": "0.0.0"
+    },
+    {
+      "id": "mecm",
+      "label": "Configuration Manager",
+      "short": "MECM",
+      "kind": "cmdlet",
+      "learn": "configurationmanager",
+      "count": 1185,
+      "version": "5.2311.1093.1"
+    },
+    {
+      "id": "errors",
+      "label": "Error codes",
+      "short": "Errors",
+      "kind": "error",
+      "count": 2215,
+      "version": "2026-11-03"
+    }
+  ]
+}
