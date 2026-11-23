@@ -149,7 +149,7 @@ function Search() {
     ? 'Index unavailable'
     : !results
       ? 'Loading index…'
-      : <>{formatCount(results.refs.length)} {results.refs.length === 1 ? 'result' : 'results'}{q ? <span class="ms"> · {results.ms < 1 ? '<1' : Math.round(results.ms)} ms</span> : null}</>;
+      : <>{formatCount(results.refs.length)} {results.refs.length === 1 ? 'result' : 'results'}{results.q ? <span class="ms"> · {results.ms < 1 ? '<1' : Math.round(results.ms)} ms</span> : null}</>;
 
   return (
     <Frame

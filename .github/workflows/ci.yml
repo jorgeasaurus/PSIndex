@@ -16,7 +16,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - run: npm run typecheck
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      # Build, typecheck and the browser suite: the same gate update-data.yml runs on refreshed data.
+      - run: npm run verify

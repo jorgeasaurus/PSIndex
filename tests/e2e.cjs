@@ -126,9 +126,11 @@ const scenarios = [
       await rowsReady(p);
       const unfiltered = await p.textContent('.count');
       await p.fill('input[type=search]', 'site settings'); // descriptions add matches above row 4 for this query
-      // Wait for this query's own results, not the unfiltered list still on screen.
-      await p.waitForFunction((was) => document.querySelector('.count')?.textContent !== was
-        && document.querySelectorAll('.result:not(.result-skel)').length > 5, unfiltered);
+      // Wait for this query's own results, not the unfiltered list still on screen: compare the
+      // result count itself (the label's other parts are not tied to which results are shown).
+      const countOf = (text) => text.split(' ')[0];
+      await p.waitForFunction(([was]) => document.querySelector('.count')?.textContent.split(' ')[0] !== was
+        && document.querySelectorAll('.result:not(.result-skel)').length > 5, [countOf(unfiltered)]);
       for (let k = 0; k < 4; k++) await p.keyboard.press('ArrowDown');
       const before = await p.textContent('.result.is-active .result-name');
       const rowTop = () => p.evaluate(() => document.querySelector('.result.is-active')?.style.top);

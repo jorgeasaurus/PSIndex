@@ -162,7 +162,7 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   }
   if (tokens.length) hits.sort((a, b) => b.score - a.score || a.len - b.len || a.ref - b.ref);
   const refs = Int32Array.from(hits, (h) => h.ref);
-  post({ type: 'results', id, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0 }, [refs.buffer]);
+  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0 }, [refs.buffer]);
 }
 
 function rowOf(all: Loaded[], ref: number): Row {

@@ -8,7 +8,8 @@
     "build": "npm run index && astro build",
     "preview": "astro preview",
     "test:e2e": "node tests/e2e.cjs",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "verify": "npm run build && npm run typecheck && playwright install --with-deps chromium && npm run test:e2e"
   },
   "dependencies": {
     "@astrojs/preact": "^6.1.6",

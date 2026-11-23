@@ -97,19 +97,14 @@ jobs:
           done
 
       # The push below uses GITHUB_TOKEN, which does not trigger ci.yml, yet Vercel deploys it.
-      # So the combined refreshed data passes the same build, typecheck and browser suite as a PR
-      # here; if upstream docs moved a cmdlet the suite relies on, nothing ships until it is fixed.
+      # So the combined refreshed data passes the same gate as a PR (npm run verify, which ci.yml
+      # runs too); if upstream docs moved a cmdlet the suite relies on, nothing ships until fixed.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - name: Build and test the refreshed site
-        run: |
-          npm ci
-          npm run build
-          npm run typecheck
-          npx playwright install --with-deps chromium
-          npm run test:e2e
+        run: npm ci && npm run verify
 
       - name: Commit
         shell: bash

@@ -137,9 +137,10 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[] 
   }
   if (!Array.isArray(manifest.d)) throw new Error(`${src.id} manifest: d is not a list`);
   const version = manifest.v;
-  if (version !== null && typeof version !== 'string') throw new Error(`${src.id} manifest: v is not a string or null`);
+  // pipelines/common.py source_version guarantees a version; anything else is a broken manifest.
+  if (typeof version !== 'string' || !version) throw new Error(`${src.id} manifest: v is not a version string`);
   const rows = manifest.d.map((r) => parseManifestRow(src, r, holders, descriptions));
-  return { version: version ?? '', rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
+  return { version, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
 }
 
 function interner() {

@@ -10,7 +10,7 @@ export interface SourceMeta {
   extra: { label: string; warn?: string } | null;
   sample: string; // example search shown on the intro panel
   count: number;
-  version: string; // '' when unknown
+  version: string;
 }
 
 /** Columnar index shard written by scripts/build-index.ts. */
@@ -81,7 +81,7 @@ export interface Facets {
 }
 
 /** One search's answer; `id` is the search's, so a re-run of the same search keeps it. */
-export interface Results { id: number; refs: Int32Array; facets: Facets; ms: number }
+export interface Results { id: number; q: string; refs: Int32Array; facets: Facets; ms: number }
 
 /** Request/reply pairs answered by the worker. */
 export interface Requests {

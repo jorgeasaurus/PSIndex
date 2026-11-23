@@ -32,16 +32,18 @@ def previous_manifest_version(source_id):
 
 
 def source_version(found, source_id):
-    """The version this run found, else the last committed one.
+    """The source version to record in manifest.json "v": always a string.
 
-    The policy for a failed PowerShell Gallery lookup: the refresh still goes through (its cmdlets
-    are current) and keeps the last known version, with a workflow warning so the stale label is
-    visible. Only with no committed version either does the manifest get null, which
-    scripts/check-shrink.py then refuses.
+    The one rule for every parser that discovers its version (MECM's is a constant). The
+    version this run found wins.
+    If it found none (a failed PowerShell Gallery lookup, or a docs folder name without one), the
+    last committed version is kept, with a workflow warning so the stale label is visible.
+    With neither, the run fails: a manifest never records an unknown version.
     """
     if found:
         return found
     previous = previous_manifest_version(source_id)
     if previous:
-        print(f"::warning::{source_id}: PowerShell Gallery lookup failed; keeping the previous version {previous}")
-    return previous
+        print(f"::warning::{source_id}: no version found this run; keeping the previous version {previous}")
+        return previous
+    raise SystemExit(f"::error::{source_id}: no version found and none committed before")

@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import output_dir
+from common import output_dir, source_version
 
 # ── Category mapping ──────────────────────────────────────────────────────────
 CATEGORY_MAP = [
@@ -200,7 +200,7 @@ def main():
     print(f"Scanning {docs_root} ...")
     azps_dir = find_latest_azps_dir(docs_root)
     version_str = re.search(r'azps-(\d+\.\d+\.\d+)', azps_dir.name)
-    version = version_str.group(1) if version_str else None
+    version = source_version(version_str.group(1) if version_str else None, 'az')
     print(f"Found: {azps_dir.name}  (version {version})")
 
     manifest_entries = []

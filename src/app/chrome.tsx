@@ -208,7 +208,7 @@ export function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) 
         {SOURCES.map((s) => (
           <div key={s.id} style={srcStyle(s.id)}>
             <dt><span class="source-dot" aria-hidden="true" />{s.label}</dt>
-            <dd>{formatCount(s.count)}{s.version ? <span> · v{s.version}</span> : null}</dd>
+            <dd>{formatCount(s.count)}<span> · v{s.version}</span></dd>
           </div>
         ))}
       </dl>
