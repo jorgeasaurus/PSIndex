@@ -19,7 +19,7 @@ pipelines/<source>/   parsers moved from the five old repos (Python, stdlib only
         │  GitHub Actions: .github/workflows/update-data.yml (daily)
         ▼
 data/<source>/        committed JSON: manifest.json, descriptions.json, modules/ or products/
-        │  npm run build → scripts/build-index.mjs
+        │  npm run build → scripts/build-index.ts
         ▼
 public/idx/           columnar search shards (~245 KB gzipped for all 41k cmdlets)
 public/data/          per-module detail, fetched only when an entry is opened
@@ -53,7 +53,7 @@ bash pipelines/refresh.sh mecm
 python3 scripts/check-shrink.py mecm   # refuses a refresh that lost entries or its version
 ```
 
-`.github/workflows/update-data.yml` runs the same script daily for every source, or on demand from the Actions tab (input `sources`: `all` or e.g. `graph,mecm`). A new source needs `pipelines/<id>/` (a `parse_docs.py` and a `source.env`), its `data/<id>/`, and an entry in `SOURCES` in `scripts/build-index.mjs`; the build fails if those three disagree.
+`.github/workflows/update-data.yml` runs the same script daily for every source, or on demand from the Actions tab (input `sources`: `all` or e.g. `graph,mecm`). A new source needs `pipelines/<id>/` (a `parse_docs.py` and a `source.env`), its `data/<id>/`, and an entry in `SOURCES` in `scripts/build-index.ts`; the build fails if those three disagree.
 
 PowerShell alternatives that read installed modules instead of docs: `pipelines/az/get-azcmdlets.ps1`, `pipelines/mecm/get-mecmcmdlets.ps1`.
 

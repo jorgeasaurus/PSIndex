@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "One searchable index of Microsoft Graph, Az, Entra, Exchange and MECM PowerShell cmdlets.",
   "scripts": {
-    "index": "node scripts/build-index.mjs",
+    "index": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/build-index.ts",
     "dev": "npm run index && astro dev",
     "build": "npm run index && astro build",
     "preview": "astro preview",
@@ -21,6 +21,7 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "playwright": "1.63.0",
     "typescript": "6.0.2"
   }

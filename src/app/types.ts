@@ -1,4 +1,4 @@
-/** Source ids come from scripts/build-index.mjs (SOURCES); they are data, not a hand-kept union. */
+/** Source ids come from scripts/build-index.ts (SOURCES); they are data, not a hand-kept union. */
 export type SourceId = string;
 
 export interface SourceMeta {
@@ -13,7 +13,7 @@ export interface SourceMeta {
   version: string; // '' when unknown
 }
 
-/** Columnar index shard written by scripts/build-index.mjs. */
+/** Columnar index shard written by scripts/build-index.ts. */
 export interface IndexShard {
   n: string[]; // cmdlet names
   v: number[]; // verb id
@@ -39,12 +39,13 @@ export interface DocumentedParam {
   description?: string;
 }
 
+/** A cmdlet's detail as scripts/build-index.ts writes it: every field present ('' / [] when the docs have none). */
 export interface CmdletDetail {
-  syntax?: string;
-  examples?: string[];
-  permissions?: string[];
-  parameters?: DocumentedParam[];
-  description?: string;
+  syntax: string;
+  examples: string[];
+  permissions: string[];
+  parameters: DocumentedParam[];
+  description: string;
 }
 export interface CmdletFile { module: string; cmdlets: Record<string, CmdletDetail> }
 

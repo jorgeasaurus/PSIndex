@@ -110,7 +110,7 @@ export function parseSyntax(syntax: string): Syntax {
 }
 
 /** Parameters some pipelines document (MECM) take precedence; the syntax fills in type and position. */
-export function withDocumented(parsed: Param[], documented: DocumentedParam[] = []): Param[] {
+export function withDocumented(parsed: Param[], documented: DocumentedParam[]): Param[] {
   if (!documented.length) return parsed;
   const byName = new Map(parsed.map((p) => [p.name, p]));
   return documented.map((p) => ({

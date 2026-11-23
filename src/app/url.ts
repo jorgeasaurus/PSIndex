@@ -3,36 +3,52 @@
 import { ALL, parseScope } from './sources';
 import type { Filters } from './types';
 
-export const EMPTY_FILTERS: Filters = { source: ALL.id, verb: '', module: '', category: '', extra: '', examples: false };
-
 const QUERY = 'q';
 const OPEN = 'c';
-/** Each filter's URL parameter. */
-const PARAMS: Record<keyof Filters, string> = { source: 's', verb: 'verb', module: 'module', category: 'cat', extra: 'ver', examples: 'ex' };
-const FILTER_KEYS = Object.keys(PARAMS) as (keyof Filters)[];
+
+/** One filter's URL parameter: its name, and how its value is read and written (null = omitted). */
+interface Codec<T> { param: string; read: (raw: string | null) => T; write: (v: T) => string | null }
+const text = (param: string): Codec<string> => ({ param, read: (raw) => raw ?? '', write: (v) => v || null });
+
+const CODECS: { [K in keyof Filters]: Codec<Filters[K]> } = {
+  // Unknown or stale source ids mean every source.
+  source: { param: 's', read: parseScope, write: (v) => (v === ALL.id ? null : v) },
+  verb: text('verb'),
+  module: text('module'),
+  category: text('cat'),
+  extra: text('ver'),
+  examples: { param: 'ex', read: (raw) => raw === '1', write: (v) => (v ? '1' : null) },
+};
+
+/** Object.keys loses the key type; CODECS has exactly the keys of Filters, so this cast is exact. */
+const FILTER_KEYS = Object.keys(CODECS) as (keyof Filters)[];
+
+function filtersFrom(p: URLSearchParams): Filters {
+  const read = <K extends keyof Filters>(k: K) => CODECS[k].read(p.get(CODECS[k].param));
+  return {
+    source: read('source'), verb: read('verb'), module: read('module'),
+    category: read('category'), extra: read('extra'), examples: read('examples'),
+  };
+}
+
+/** The filters of a URL that sets none: every source, nothing narrowed. */
+export const EMPTY_FILTERS = filtersFrom(new URLSearchParams());
 
 export interface UrlState { q: string; filters: Filters; open: string }
 
 export function readUrl(): UrlState {
   const p = new URLSearchParams(location.search);
-  const filters = { ...EMPTY_FILTERS };
-  for (const k of FILTER_KEYS) {
-    const raw = p.get(PARAMS[k]);
-    if (raw === null) continue;
-    (filters as Record<keyof Filters, string | boolean>)[k] = typeof EMPTY_FILTERS[k] === 'boolean' ? raw === '1' : raw;
-  }
-  // Unknown or stale source ids mean every source.
-  filters.source = parseScope(p.get(PARAMS.source));
-  return { q: p.get(QUERY) ?? '', filters, open: p.get(OPEN) ?? '' };
+  return { q: p.get(QUERY) ?? '', filters: filtersFrom(p), open: p.get(OPEN) ?? '' };
 }
 
 export function writeUrl({ q, filters, open }: UrlState) {
   const p = new URLSearchParams();
   if (q) p.set(QUERY, q);
-  for (const k of FILTER_KEYS) {
-    const v = filters[k];
-    if (v !== EMPTY_FILTERS[k]) p.set(PARAMS[k], v === true ? '1' : String(v));
-  }
+  const write = <K extends keyof Filters>(k: K) => {
+    const v = CODECS[k].write(filters[k]);
+    if (v !== null) p.set(CODECS[k].param, v);
+  };
+  FILTER_KEYS.forEach(write);
   if (open) p.set(OPEN, open);
   const qs = p.toString();
   const url = location.pathname + (qs ? '?' + qs : '');

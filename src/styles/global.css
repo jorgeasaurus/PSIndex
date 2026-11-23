@@ -19,7 +19,7 @@
   --faint: #7f89a3;
   --code-bg: #0a0e16;
 
-  /* Source hues come from scripts/build-index.mjs and are set inline as --src. */
+  /* Source hues come from scripts/build-index.ts and are set inline as --src. */
   --src-all: #b9c3d6;
 
   --tok-cmd: #c7b8ff;

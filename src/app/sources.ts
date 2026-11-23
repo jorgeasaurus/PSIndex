@@ -1,7 +1,7 @@
 import generated from '../sources.generated.json';
 import type { SourceId, SourceMeta } from './types';
 
-/** The source list, bundled at build time into both the page and the worker (see scripts/build-index.mjs). */
+/** The source list, bundled at build time into both the page and the worker (see scripts/build-index.ts). */
 export const SOURCES: SourceMeta[] = generated.sources;
 export const TOTAL = generated.total;
 

@@ -37,7 +37,17 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
   const setActive = (i: number) => setCursor({ id: searchId, i });
 
   useImperativeHandle(navRef, () => ({
-    move: (delta) => { if (refs?.length) setActive(Math.max(0, Math.min(refs.length - 1, active + delta))); },
+    move: (delta) => {
+      if (!refs?.length) return;
+      const i = Math.max(0, Math.min(refs.length - 1, active + delta));
+      setActive(i);
+      // Keyboard moves keep the cursor in view (hover only highlights, so it never scrolls).
+      const el = scroller.current;
+      if (!el) return;
+      const top = i * ROW_H;
+      if (top < el.scrollTop) el.scrollTop = top;
+      else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
+    },
     // The cursor is kept in view, so its row is normally materialised; if it is not yet, Enter does nothing.
     openActive: () => { const row = refs?.length ? rows.get(refs[active]) : undefined; if (row) onOpen(row); },
   }), [refs, rows, active, searchId, onOpen]);
@@ -72,15 +82,6 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
     client.request('rows', { refs: window }).then((got) => live && setRows(new Map(got.map((r, k) => [window[k], r]))));
     return () => { live = false; };
   }, [client, refs, range]);
-
-  // Keep the keyboard cursor in view.
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const top = active * ROW_H;
-    if (top < el.scrollTop) el.scrollTop = top;
-    else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
-  }, [active]);
 
   if (refs && refs.length === 0) return <div class="results results-empty">{empty}</div>;
 

@@ -1,5 +1,5 @@
 import { createRef } from 'preact';
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { SearchClient } from './client';
 import { useAsciiField } from './ascii';
 import { useTheme } from './theme';
@@ -70,6 +70,8 @@ function Search() {
   const link = sel && 'link' in sel ? sel.link : '';
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
   const openKey = open?.key ?? link;
+  // Each entry opens at its top (the pane, not the article, is what scrolls).
+  useLayoutEffect(() => { if (detailRef.current) detailRef.current.scrollTop = 0; }, [open?.key]);
   useEffect(() => writeUrl({ q, filters, open: openKey }), [q, filters, openKey]);
 
   // Resolve the deep link. An old or unqualified key adopts the row's canonical key.
@@ -171,7 +173,8 @@ function Search() {
       }
       detail={
         open
-          ? <Detail row={open} client={client} onOpen={openRow} onClose={close} />
+          // Keyed by entry: each one starts fresh (no related list or body from the previous entry).
+          ? <Detail key={open.key} row={open} client={client} onOpen={openRow} onClose={close} />
           : <Intro onPick={(s, sample) => { setSource(s); setQ(sample); inputRef.current?.focus(); }} />
       }
     />

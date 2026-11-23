@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ArrowLeft, ExternalLink, Link2 } from 'lucide-preact';
 import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
@@ -17,19 +17,16 @@ interface Props {
 
 export function Detail({ row, client, onOpen, onClose }: Props) {
   const [related, setRelated] = useState<Row[]>([]);
-  const top = useRef<HTMLElement>(null);
   const src = sourceOf(row.source);
 
   useEffect(() => {
     let live = true;
-    top.current?.scrollTo?.({ top: 0 });
-    setRelated([]);
     client.request('related', { key: row.key }).then((r) => live && setRelated(r));
     return () => { live = false; };
   }, [row.key]);
 
   return (
-    <article class="detail" ref={top} style={srcStyle(row.source)} aria-labelledby="detail-title">
+    <article class="detail" style={srcStyle(row.source)} aria-labelledby="detail-title">
       <div class="detail-head">
         <button type="button" class="icon-btn detail-back" onClick={onClose} aria-label="Back to results"><ArrowLeft size={18} /></button>
         <h2 id="detail-title" class="detail-title">
@@ -77,7 +74,6 @@ function CmdletEntry({ row }: { row: Row }) {
   const [state, setState] = useState<EntryState>({ status: 'loading' });
   useEffect(() => {
     let live = true;
-    setState({ status: 'loading' });
     loadModule(row.source, row.file)
       .then((file: CmdletFile) => {
         const cmdlet = file.cmdlets[row.name];
@@ -97,14 +93,14 @@ function CmdletEntry({ row }: { row: Row }) {
 
 function CmdletBody({ c }: { c: CmdletDetail }) {
   const { sets, params } = useMemo(() => {
-    const syntax = parseSyntax(c.syntax ?? '');
+    const syntax = parseSyntax(c.syntax);
     return { sets: syntax.sets, params: withDocumented(syntax.params, c.parameters) };
   }, [c]);
   const [showCommon, setShowCommon] = useState(false);
   const visible = showCommon ? params : params.filter((p) => !isCommonParam(p.name));
   const hidden = params.length - visible.length;
-  const examples = (c.examples ?? []).filter((x) => x.trim());
-  const perms = c.permissions ?? [];
+  const examples = c.examples.filter((x) => x.trim());
+  const perms = c.permissions;
   return (
     <>
       {c.description && <p class="detail-desc">{c.description}</p>}

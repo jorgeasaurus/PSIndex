@@ -58,6 +58,20 @@ async function run(browser) {
     check(third && third !== 'Get-MgUser' && activeTop === '0px', 'keyboard cursor opens its row and resets per search', `${third}, active at ${activeTop}`);
   }
 
+  // Opening a related entry from a scrolled detail pane starts the new entry at its top.
+  {
+    await p.fill('input[type=search]', 'get-mguser');
+    await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent === 'Get-MgUser');
+    await p.click('.result');
+    await p.waitForSelector('.related button');
+    const scrolled = await p.evaluate(() => { const el = document.querySelector('.pane-detail'); el.scrollTop = el.scrollHeight; return el.scrollTop; });
+    const next = await p.textContent('.related button code');
+    await p.click('.related button');
+    await p.waitForFunction((n) => document.querySelector('.detail-title code')?.textContent === n, next);
+    const after = await p.evaluate(() => document.querySelector('.pane-detail').scrollTop);
+    check(scrolled > 0 && after === 0, 'related entry opens at the top of the pane', `scrollTop ${scrolled} -> ${after}`);
+  }
+
   // Descriptions arriving late refresh the rows in place: the scroll position survives.
   {
     const c2 = await browser.newContext();
