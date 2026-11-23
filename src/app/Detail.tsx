@@ -1,11 +1,11 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ArrowLeft, ExternalLink, Link2 } from 'lucide-preact';
-import { loadDetail, type SearchClient } from './client';
+import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
 import { isCommonParam, parseParams, tokenize, type Param } from './powershell';
-import { KINDS, sourceMeta, srcStyle } from './sources';
-import type { CmdletDetail, CmdletFile, ErrorDetail, ErrorFile, Row, SourceKind, SourceMeta } from './types';
+import { isWarnExtra, sourceOf, srcStyle } from './sources';
+import type { CmdletDetail, CmdletFile, Row, SourceMeta } from './types';
 
 interface Props {
   row: Row;
@@ -17,8 +17,7 @@ interface Props {
 export function Detail({ row, client, onOpen, onClose }: Props) {
   const [related, setRelated] = useState<Row[]>([]);
   const top = useRef<HTMLElement>(null);
-  const src = sourceMeta(row.source)!; // rows only come from the worker, which only knows SOURCES
-  const Body = BODIES[src.kind];
+  const src = sourceOf(row.source);
 
   useEffect(() => {
     let live = true;
@@ -43,7 +42,7 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
           {row.module && <span class="tag">{row.module}</span>}
           {row.verb && <span class="tag">{row.verb}</span>}
           {row.category && row.category !== row.module && !row.module.endsWith('.' + row.category) && <span class="tag">{row.category}</span>}
-          {row.extra && <span class={'tag' + (row.extra === 'beta' ? ' tag-warn' : '')}>{row.extra}</span>}
+          {row.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{row.extra}</span>}
           {row.perms > 0 && <span class="tag">{row.perms} permission{row.perms === 1 ? '' : 's'}</span>}
         </div>
         <div class="detail-links">
@@ -52,11 +51,11 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
         </div>
       </div>
 
-      <Body row={row} />
+      <CmdletEntry row={row} />
 
       {related.length > 0 && (
         <section class="block">
-          <h3>{KINDS[src.kind].relatedTitle(row.name)}</h3>
+          <h3>Same noun · {row.name.slice(row.name.indexOf('-') + 1)}</h3>
           <ul class="related">
             {related.map((r) => (
               <li key={r.key}>
@@ -72,18 +71,18 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
   );
 }
 
-type EntryState<E> = { status: 'loading' } | { status: 'missing' } | { status: 'failed'; message: string } | { status: 'ok'; entry: E };
+type EntryState = { status: 'loading' } | { status: 'missing' } | { status: 'failed'; message: string } | { status: 'ok'; cmdlet: CmdletDetail };
 
-/** Loads the detail file for `row`, picks the row's entry out of it, and renders loading / error states. */
-function Entry<F, E>({ row, pick, render }: { row: Row; pick: (file: F) => E | undefined; render: (entry: E) => ComponentChildren }) {
-  const [state, setState] = useState<EntryState<E>>({ status: 'loading' });
+/** Loads the row's module file and renders its entry, or the loading / error state. */
+function CmdletEntry({ row }: { row: Row }) {
+  const [state, setState] = useState<EntryState>({ status: 'loading' });
   useEffect(() => {
     let live = true;
     setState({ status: 'loading' });
-    loadDetail<F>(row.source, row.file)
-      .then((file) => {
-        const entry = pick(file);
-        if (live) setState(entry ? { status: 'ok', entry } : { status: 'missing' });
+    loadModule(row.source, row.file)
+      .then((file: CmdletFile) => {
+        const cmdlet = file.cmdlets[row.name];
+        if (live) setState(cmdlet ? { status: 'ok', cmdlet } : { status: 'missing' });
       })
       .catch((e) => live && setState({ status: 'failed', message: e.message }));
     return () => { live = false; };
@@ -91,16 +90,11 @@ function Entry<F, E>({ row, pick, render }: { row: Row; pick: (file: F) => E | u
 
   switch (state.status) {
     case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
-    case 'missing': return <p class="notice notice-error" role="alert">This entry is in the index but its detail file has no record for it.</p>;
-    case 'failed': return <p class="notice notice-error" role="alert">Couldn’t load details ({state.message}). Check your connection and pick the entry again.</p>;
-    case 'ok': return <>{render(state.entry)}</>;
+    case 'missing': return <p class="notice notice-error" role="alert">This cmdlet is in the index but its module file has no record for it.</p>;
+    case 'failed': return <p class="notice notice-error" role="alert">Couldn’t load details ({state.message}). Check your connection and pick the cmdlet again.</p>;
+    case 'ok': return <CmdletBody c={state.cmdlet} row={row} />;
   }
 }
-
-const BODIES: Record<SourceKind, (p: { row: Row }) => ComponentChildren> = {
-  cmdlet: ({ row }) => <Entry<CmdletFile, CmdletDetail> row={row} pick={(f) => f.cmdlets[row.name]} render={(c) => <CmdletBody c={c} row={row} />} />,
-  error: ({ row }) => <Entry<ErrorFile, ErrorDetail> row={row} pick={(f) => f.errors[row.name]} render={(e) => <ErrorBody e={e} name={row.name} />} />,
-};
 
 /** Pipelines that document parameters (MECM) win; otherwise parameters are parsed from the syntax. */
 function paramsOf(c: CmdletDetail): Param[] {
@@ -167,24 +161,6 @@ function CmdletBody({ c, row }: { c: CmdletDetail; row: Row }) {
         <h3>Examples</h3>
         {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
       </section>
-    </>
-  );
-}
-
-function ErrorBody({ e, name }: { e: ErrorDetail; name: string }) {
-  return (
-    <>
-      {e.message && <p class="detail-desc detail-message">{e.message}</p>}
-      {e.description && (
-        <section class="block"><h3>Description</h3><p class="prose">{e.description}</p></section>
-      )}
-      <section class="block">
-        <h3>Resolution</h3>
-        {e.resolution ? <p class="prose">{e.resolution}</p> : <p class="h-sub">Microsoft’s docs list no resolution for this code. Search Microsoft Learn for <code>{name}</code>.</p>}
-      </section>
-      {e.source_file && (
-        <section class="block"><h3>Source</h3><p class="h-sub"><code>{e.source_file}</code></p></section>
-      )}
     </>
   );
 }

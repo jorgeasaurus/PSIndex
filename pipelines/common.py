@@ -8,7 +8,6 @@ def keep_previous_versions(versions, modules, data_dir):
 
     `versions` maps module name -> version ('' or None when the lookup failed) and is updated in
     place from the module files the last successful run wrote to `data_dir/modules/`.
-    Returns the module names that were filled.
     """
     kept = []
     for module in modules:
@@ -23,4 +22,3 @@ def keep_previous_versions(versions, modules, data_dir):
             kept.append(module)
     if kept:
         print(f"  Gallery lookup failed for {', '.join(kept)}; kept previous versions")
-    return kept

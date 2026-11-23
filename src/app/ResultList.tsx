@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { SearchClient } from './client';
-import { kindOf, srcStyle } from './sources';
+import { isWarnExtra, queryTokens, sourceOf, srcStyle } from './sources';
 import type { Row } from './types';
 
 const ROW_H = 64;
@@ -116,6 +116,7 @@ const SkeletonRows = () => (
 export const ResultsSkeleton = () => <div class="results" aria-busy="true" aria-label="Search results"><SkeletonRows /></div>;
 
 function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number; row: Row; query: string; active: boolean; open: boolean; onOpen: (r: Row) => void; onHover: (i: number) => void }) {
+  const tag = row.dup ? row.module : isWarnExtra(sourceOf(row.source), row.extra) ? row.extra : '';
   return (
     <div
       role="option"
@@ -128,32 +129,27 @@ function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number
       <div class="result-line">
         <span class="source-dot" aria-hidden="true" />
         <code class="result-name"><Mark text={row.name} q={query} /></code>
-        <span class="result-meta">{kindOf(row.source).rowTag(row)}</span>
+        <span class="result-meta">{tag}</span>
       </div>
       <p class="result-desc">{row.desc || <span class="result-module">{row.module || row.category}</span>}</p>
     </div>
   );
 }
 
-/** Highlight the first occurrence of each query token in a name. */
+/** Highlight each query token in a name, tokenised the same way the worker matched it. */
 function Mark({ text, q }: { text: string; q: string }) {
-  const tokens = q.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
-  if (!tokens.length) return <>{text}</>;
   const lower = text.toLowerCase();
-  const marks: [number, number][] = [];
-  for (const t of tokens) {
-    const at = lower.indexOf(t.replace(/^0x/, ''));
-    if (at >= 0) marks.push([at, at + t.replace(/^0x/, '').length]);
-  }
-  if (!marks.length) return <>{text}</>;
-  marks.sort((a, b) => a[0] - b[0]);
+  const marks = queryTokens(q)
+    .map((t) => [lower.indexOf(t), t.length] as const)
+    .filter(([at]) => at >= 0)
+    .sort((a, b) => a[0] - b[0]);
   const out = [];
   let pos = 0;
-  for (const [a, b] of marks) {
-    if (a < pos) continue;
-    if (a > pos) out.push(text.slice(pos, a));
-    out.push(<mark key={a}>{text.slice(a, b)}</mark>);
-    pos = b;
+  for (const [at, len] of marks) {
+    if (at < pos) continue;
+    if (at > pos) out.push(text.slice(pos, at));
+    out.push(<mark key={at}>{text.slice(at, at + len)}</mark>);
+    pos = at + len;
   }
   out.push(text.slice(pos));
   return <>{out}</>;

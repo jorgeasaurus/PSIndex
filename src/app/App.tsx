@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { Search, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { SearchClient } from './client';
-import { AsciiField } from './ascii';
+import { AsciiField, type Theme } from './ascii';
 import { ResultList, ResultsSkeleton } from './ResultList';
 import { Detail } from './Detail';
-import { KINDS, SOURCES, TOTAL, kindOf, sourceColor, sourceMeta, srcStyle } from './sources';
+import { ALL, SOURCES, TOTAL, isScope, scopeOf, srcStyle } from './sources';
 import type { Facets, Filters, Row, SourceId } from './types';
 
-const EMPTY_FILTERS: Filters = { source: 'all', verb: '', module: '', category: '', extra: '', examples: false };
+const EMPTY_FILTERS: Filters = { source: ALL.id, verb: '', module: '', category: '', extra: '', examples: false };
 const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] };
 
 function readUrl(): { q: string; filters: Filters; open: string } {
   const p = new URLSearchParams(location.search);
-  const s = p.get('s') ?? 'all';
+  const s = p.get('s') ?? ALL.id;
   return {
     q: p.get('q') ?? '',
     open: p.get('c') ?? '',
     filters: {
-      source: sourceMeta(s) ? s : 'all',
+      source: isScope(s) ? s : ALL.id,
       verb: p.get('verb') ?? '',
       module: p.get('module') ?? '',
       category: p.get('cat') ?? '',
@@ -30,7 +30,7 @@ function readUrl(): { q: string; filters: Filters; open: string } {
 function writeUrl(q: string, f: Filters, open: string) {
   const p = new URLSearchParams();
   if (q) p.set('q', q);
-  if (f.source !== 'all') p.set('s', f.source);
+  if (f.source !== EMPTY_FILTERS.source) p.set('s', f.source);
   if (f.verb) p.set('verb', f.verb);
   if (f.module) p.set('module', f.module);
   if (f.category) p.set('cat', f.category);
@@ -43,6 +43,12 @@ function writeUrl(q: string, f: Filters, open: string) {
 }
 
 const fmt = new Intl.NumberFormat('en-US');
+
+const sameFilters = (a: Filters, b: Filters) => (Object.keys(a) as (keyof Filters)[]).every((k) => a[k] === b[k]);
+
+/** The entry in the detail pane: its key (from a click or a link) and, once resolved, its row. */
+interface Open { key: string; row: Row | null }
+const CLOSED: Open = { key: '', row: null };
 
 let measureCtx: CanvasRenderingContext2D | null = null;
 /** Width of `text` in `el`'s font, for placing the search ripple at the caret. */
@@ -59,11 +65,10 @@ export default function App() {
   const [facets, setFacets] = useState<Facets>(NO_FACETS);
   const [ms, setMs] = useState(0);
   const [active, setActive] = useState(0);
-  const [openKey, setOpenKey] = useState('');
-  const [openRow, setOpenRow] = useState<Row | null>(null);
+  const [open, setOpen] = useState<Open>(CLOSED);
   const [descTick, setDescTick] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark' | null>(null);
+  const [theme, setTheme] = useState<Theme | null>(null); // null = follow the OS
   const [loadError, setLoadError] = useState('');
   const [client, setClient] = useState<SearchClient | null>(null); // created after mount; null while server-rendering
 
@@ -76,25 +81,18 @@ export default function App() {
     const initial = readUrl();
     setQ(initial.q);
     setFilters(initial.filters);
-    setOpenKey(initial.open);
+    setOpen({ key: initial.open, row: null });
     setClient(new SearchClient({
       onResults: (r) => { setRefs(r.refs); setFacets(r.facets); setMs(r.ms); },
       onDescriptions: () => setDescTick((t) => t + 1),
       onLoadError: setLoadError,
     }));
     if (canvasRef.current) {
-      const f = new AsciiField({ canvas: canvasRef.current });
-      field.current = f;
-      f.setTone(fieldColor(initial.filters.source), toneDim());
-      document.fonts?.ready.then(() => f.refresh());
-      f.start();
-      const quiet = () => f.setQuiet([...document.querySelectorAll('[data-quiet]')].map((el) => el.getBoundingClientRect()));
-      quiet();
-      addEventListener('resize', quiet, { passive: true });
-      document.fonts?.ready.then(quiet);
+      field.current = new AsciiField(canvasRef.current);
+      field.current.start();
     }
     try {
-      const saved = localStorage.getItem('psindex-theme') as 'light' | 'dark' | null;
+      const saved = localStorage.getItem('psindex-theme') as Theme | null;
       if (saved) setTheme(saved);
     } catch {}
   }, []);
@@ -103,28 +101,22 @@ export default function App() {
   useEffect(() => {
     client?.search(q, filters);
     setActive(0);
-    writeUrl(q, filters, openKey);
   }, [q, filters, client]);
 
-  useEffect(() => writeUrl(q, filters, openKey), [openKey]);
+  // Mirror state into the URL, once the boot effect has adopted the URL (it sets `client` in the same batch).
+  useEffect(() => { if (client) writeUrl(q, filters, open.key); }, [q, filters, open.key, client]);
 
-  // Resolve the open entry (deep links, clicks, keyboard).
+  // Resolve a key that has no row yet (a deep link). An old or unqualified key adopts the row's canonical key.
   useEffect(() => {
-    if (!openKey) { setOpenRow(null); return; }
-    if (!client || openRow?.key === openKey) return;
+    if (!client || !open.key || open.row) return;
     let live = true; // a later click or close supersedes this lookup
-    client.request('find', { key: openKey }).then((r) => {
-      if (!live) return;
-      setOpenRow(r);
-      // An old or unqualified link resolved to a row: adopt its canonical key so the row highlights and the URL updates.
-      if (r && r.key !== openKey) setOpenKey(r.key);
-    });
+    client.request('find', { key: open.key }).then((row) => live && setOpen(row ? { key: row.key, row } : CLOSED));
     return () => { live = false; };
-  }, [openKey, client]);
+  }, [open, client]);
 
-  // Source tint for the field; keep the active tab visible on narrow screens.
+  // Field tint follows the source and theme; keep the active tab visible on narrow screens.
   useEffect(() => {
-    field.current?.setTone(fieldColor(filters.source), toneDim());
+    field.current?.setTone(scopeOf(filters.source).color, theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
     document.querySelector('.source.is-on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [filters.source, theme]);
 
@@ -157,21 +149,16 @@ export default function App() {
   };
 
   const setFilter = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
-  // Verb and the examples flag carry over between sources of the same kind; across kinds they mean different things.
-  const setSource = (s: Filters['source']) =>
-    setFilters((f) => {
-      const keep = kindOf(s) === kindOf(f.source);
-      return { ...EMPTY_FILTERS, source: s, examples: keep && f.examples, verb: keep ? f.verb : '' };
-    });
+  // Verb and the examples flag mean the same in every source, so they carry over; module, category and extra don't.
+  const setSource = (s: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source: s, verb: f.verb, examples: f.examples }));
 
-  const open = useCallback((row: Row) => {
-    setOpenRow(row);
-    setOpenKey(row.key);
+  const openRow = useCallback((row: Row) => {
+    setOpen({ key: row.key, row });
     // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
     const pane = document.querySelector('.pane-detail')?.getBoundingClientRect();
     if (pane && pane.width) field.current?.pulse(pane.left + 40, pane.top + 40, 0.7);
   }, []);
-  const close = useCallback(() => { setOpenKey(''); setOpenRow(null); }, []);
+  const close = useCallback(() => setOpen(CLOSED), []);
 
   const onInputKey = async (e: KeyboardEvent) => {
     // The box is autofocused, so the "/" shortcut lands here; nobody searches for a leading slash.
@@ -182,15 +169,14 @@ export default function App() {
     else if (e.key === 'Enter' && refs.length) {
       e.preventDefault();
       const [row] = await client.request('rows', { refs: [refs[active]] });
-      if (row) open(row);
+      if (row) openRow(row);
     } else if (e.key === 'Escape') {
-      if (openKey) close(); else if (q) setQ('');
+      if (open.key) close(); else if (q) setQ('');
     }
   };
 
   const activeFilterCount = [filters.verb, filters.module, filters.category, filters.extra, filters.examples].filter(Boolean).length;
-  const srcMeta = sourceMeta(filters.source);
-  const placeholder = srcMeta ? KINDS[srcMeta.kind].placeholder(srcMeta) : `Search ${fmt.format(TOTAL)} cmdlets & errors`;
+  const scope = scopeOf(filters.source);
 
   const resultsLabel = loadError ? 'Index unavailable' : refs == null ? 'Loading index…' : `${fmt.format(refs.length)} ${refs.length === 1 ? 'result' : 'results'}`;
   const toggleTheme = () => {
@@ -199,7 +185,7 @@ export default function App() {
   };
 
   return (
-    <div class="app" style={srcStyle(filters.source)} data-open={openKey ? '' : undefined}>
+    <div class="app" style={srcStyle(filters.source)} data-open={open.key ? '' : undefined}>
       <canvas ref={canvasRef} class="field" aria-hidden="true" />
 
       <header class="band">
@@ -207,7 +193,7 @@ export default function App() {
           <a class="wordmark" data-quiet href="/" aria-label="PSIndex home" onClick={(e) => { e.preventDefault(); setQ(''); setFilters(EMPTY_FILTERS); close(); }}>
             <span class="wordmark-ps">PS</span>Index
           </a>
-          <p class="tagline" data-quiet>PowerShell for Graph, Az, Entra, Exchange and MECM, plus Microsoft error codes. One index.</p>
+          <p class="tagline" data-quiet>PowerShell cmdlets for Graph, Az, Entra, Exchange and MECM. One index.</p>
           <div class="band-actions" data-quiet>
             <button class="icon-btn" type="button" onClick={toggleTheme} aria-label="Toggle light or dark theme">
               <Sun class="i-sun" size={18} /><Moon class="i-moon" size={18} />
@@ -225,9 +211,9 @@ export default function App() {
             autoFocus
             spellcheck={false}
             autoComplete="off"
-            aria-label="Search cmdlets and error codes"
+            aria-label="Search cmdlets"
             aria-controls="results"
-            placeholder={placeholder}
+            placeholder={scope.placeholder}
             onInput={(e) => { setQ((e.target as HTMLInputElement).value); pulseFromInput(); }}
             onKeyDown={onInputKey}
           />
@@ -239,7 +225,7 @@ export default function App() {
         </div>
 
         <nav class="sources" aria-label="Source">
-          <SourceTab id="all" label="All" count={TOTAL} current={filters.source} onPick={setSource} />
+          <SourceTab id={ALL.id} label="All" count={TOTAL} current={filters.source} onPick={setSource} />
           {SOURCES.map((s) => (
             <SourceTab key={s.id} id={s.id} label={s.short} count={s.count} current={filters.source} onPick={setSource} />
           ))}
@@ -268,11 +254,11 @@ export default function App() {
             refs={refs}
             active={active}
             setActive={setActive}
-            openKey={openKey}
-            onOpen={open}
+            openKey={open.key}
+            onOpen={openRow}
             descTick={descTick}
             query={q}
-            empty={<EmptyState q={q} filters={filters} sourceLabel={srcMeta?.short} reset={() => setFilters(EMPTY_FILTERS)} />}
+            empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={!sameFilters(filters, EMPTY_FILTERS)} reset={() => setFilters(EMPTY_FILTERS)} />}
             failed={loadError ? (
               <div class="empty" role="alert">
                 <p class="empty-title">The search index didn’t load.</p>
@@ -284,8 +270,8 @@ export default function App() {
         </section>
 
         <section class="pane pane-detail" aria-label="Details">
-          {openRow && client ? (
-            <Detail row={openRow} client={client} onOpen={open} onClose={close} />
+          {open.row && client ? (
+            <Detail row={open.row} client={client} onOpen={openRow} onClose={close} />
           ) : (
             <Intro onPick={(s, qq) => { setSource(s); setQ(qq); inputRef.current?.focus(); }} />
           )}
@@ -293,24 +279,6 @@ export default function App() {
       </main>
     </div>
   );
-}
-
-/** Source hue for the canvas; darkened in light theme so glyphs read on the pale ground. */
-function fieldColor(s: Filters['source']) {
-  const hex = sourceColor(s);
-  if (toneDim() > 0.8) {
-    const n = parseInt(hex.slice(1), 16);
-    const k = 0.62;
-    const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * k).toString(16).padStart(2, '0'));
-    return '#' + c.join('');
-  }
-  return hex;
-}
-
-function toneDim() {
-  const root = document.documentElement;
-  const light = root.dataset.theme ? root.dataset.theme === 'light' : !matchMedia('(prefers-color-scheme: dark)').matches;
-  return light ? 0.85 : 0.78;
 }
 
 function SourceTab({ id, label, count, current, onPick }: { id: Filters['source']; label: string; count: number; current: string; onPick: (s: Filters['source']) => void }) {
@@ -325,15 +293,14 @@ function SourceTab({ id, label, count, current, onPick }: { id: Filters['source'
 }
 
 function FilterBar({ facets, filters, setFilter, clear }: { facets: Facets; filters: Filters; setFilter: <K extends keyof Filters>(k: K, v: Filters[K]) => void; clear: () => void }) {
-  const kind = kindOf(filters.source);
-  const extraLabel = sourceMeta(filters.source)?.extraLabel;
+  const { extraLabel } = scopeOf(filters.source);
   return (
     <div class="filters" id="filters">
-      {kind.hasVerbs && facets.verbs.length > 0 && (
+      {facets.verbs.length > 0 && (
         <Select label="Verb" value={filters.verb} options={facets.verbs} onChange={(v) => setFilter('verb', v)} />
       )}
       {facets.modules.length > 1 && (
-        <Select label={kind.moduleLabel} value={filters.module} options={facets.modules} onChange={(v) => setFilter('module', v)} />
+        <Select label="Module" value={filters.module} options={facets.modules} onChange={(v) => setFilter('module', v)} />
       )}
       {facets.categories.length > 1 && (
         <Select label="Category" value={filters.category} options={facets.categories} onChange={(v) => setFilter('category', v)} />
@@ -343,7 +310,7 @@ function FilterBar({ facets, filters, setFilter, clear }: { facets: Facets; filt
       )}
       <label class="check">
         <input type="checkbox" checked={filters.examples} onChange={(e) => setFilter('examples', (e.target as HTMLInputElement).checked)} />
-        {kind.flagLabel}
+        Has examples
       </label>
       <button type="button" class="link-btn" onClick={clear}>Reset</button>
     </div>
@@ -362,12 +329,11 @@ function Select({ label, value, options, onChange }: { label: string; value: str
   );
 }
 
-function EmptyState({ q, filters, sourceLabel, reset }: { q: string; filters: Filters; sourceLabel?: string; reset: () => void }) {
-  const filtered = filters.source !== 'all' || filters.verb || filters.module || filters.category || filters.extra || filters.examples;
+function EmptyState({ q, inLabel, filtered, reset }: { q: string; inLabel: string; filtered: boolean; reset: () => void }) {
   return (
     <div class="empty">
-      <p class="empty-title">{q ? <>No match for “{q}”{sourceLabel ? ` in ${sourceLabel}` : ''}.</> : 'Nothing matches these filters.'}</p>
-      <p>Try the noun alone (<code>MgUser</code> instead of <code>Get-MgUser</code>), fewer words, or an error code without the <code>0x</code>.</p>
+      <p class="empty-title">{q ? <>No match for “{q}”{inLabel}.</> : 'Nothing matches these filters.'}</p>
+      <p>Try the noun alone (<code>MgUser</code> instead of <code>Get-MgUser</code>), or fewer words.</p>
       {filtered && <button type="button" class="chip" onClick={reset}>Search every source</button>}
     </div>
   );
@@ -378,7 +344,7 @@ function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) {
     <div class="intro">
       <h2>Type a fragment. Get the command.</h2>
       <p class="intro-lede">
-        {fmt.format(TOTAL)} entries from six Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
+        {fmt.format(TOTAL)} cmdlets from five Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
       </p>
       <ul class="intro-samples" aria-label="Example searches">
         {SOURCES.map((s) => (
@@ -393,7 +359,7 @@ function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) {
         {SOURCES.map((s) => (
           <div key={s.id} style={srcStyle(s.id)}>
             <dt><span class="source-dot" aria-hidden="true" />{s.label}</dt>
-            <dd>{fmt.format(s.count)}{s.version && s.version !== '0.0.0' ? <span> · {KINDS[s.kind].versionPrefix}{s.version}</span> : null}</dd>
+            <dd>{fmt.format(s.count)}{s.version && s.version !== '0.0.0' ? <span> · v{s.version}</span> : null}</dd>
           </div>
         ))}
       </dl>

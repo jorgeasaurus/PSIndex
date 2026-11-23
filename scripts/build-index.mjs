@@ -2,7 +2,7 @@
 //   src/sources.generated.json        – the source list (single source of truth for the app and worker)
 //   public/idx/<source>.json          – columnar search index (names + facets), loaded first
 //   public/idx/<source>.desc.json     – short descriptions aligned to the index, loaded after first paint
-//   public/data/<source>/<file>.json  – per-module / per-product detail, fetched on demand
+//   public/data/<source>/<module>.json – per-module detail, fetched on demand
 import { readFile, writeFile, readdir, mkdir, rm } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 
@@ -14,19 +14,19 @@ const DESC_MAX = 220;
 
 const LEARN_MODULE = 'https://learn.microsoft.com/powershell/module/{module}/{name}';
 
-// Every per-source fact lives here. `extraLabel` names the shard's `x` column for that source;
-// `sample` is the example search the intro panel offers.
+// Every per-source fact lives here.
+//   extra:  an optional per-cmdlet facet; `field` is its key in the pipeline's manifest rows,
+//           `warn` a value shown as a caution (Graph/Entra "beta").
+//   sample: the example search the intro panel offers.
 const SOURCES = [
-  { id: 'graph', sample: 'Get-MgUser', label: 'Microsoft Graph', short: 'Graph', kind: 'cmdlet', color: '#9b8cff', extraLabel: 'API', learn: LEARN_MODULE },
-  { id: 'az', sample: 'Get-AzVM', label: 'Azure (Az)', short: 'Az', kind: 'cmdlet', color: '#4cb3ff', extraLabel: '', learn: LEARN_MODULE },
-  { id: 'entra', sample: 'Get-EntraGroupMember', label: 'Microsoft Entra', short: 'Entra', kind: 'cmdlet', color: '#2fd0b5', extraLabel: 'API', learn: LEARN_MODULE },
-  { id: 'exchange', sample: 'Set-Mailbox', label: 'Exchange, Teams & SharePoint', short: 'Exchange', kind: 'cmdlet', color: '#f2b33d', extraLabel: '', learn: LEARN_MODULE },
-  { id: 'mecm', sample: 'Invoke-CMClientAction', label: 'Configuration Manager', short: 'MECM', kind: 'cmdlet', color: '#7fd45a', extraLabel: 'Site role', learn: 'https://learn.microsoft.com/powershell/module/configurationmanager/{name}' },
-  { id: 'errors', sample: 'AADSTS50076', label: 'Error codes', short: 'Errors', kind: 'error', color: '#ff7a6b', extraLabel: '', learn: '' },
+  { id: 'graph', label: 'Microsoft Graph', short: 'Graph', color: '#9b8cff', sample: 'Get-MgUser', learn: LEARN_MODULE, extra: { label: 'API', field: 'a', warn: 'beta' } },
+  { id: 'az', label: 'Azure (Az)', short: 'Az', color: '#4cb3ff', sample: 'Get-AzVM', learn: LEARN_MODULE, extra: null },
+  { id: 'entra', label: 'Microsoft Entra', short: 'Entra', color: '#2fd0b5', sample: 'Get-EntraGroupMember', learn: LEARN_MODULE, extra: { label: 'API', field: 'a', warn: 'beta' } },
+  { id: 'exchange', label: 'Exchange, Teams & SharePoint', short: 'Exchange', color: '#f2b33d', sample: 'Set-Mailbox', learn: LEARN_MODULE, extra: null },
+  { id: 'mecm', label: 'Configuration Manager', short: 'MECM', color: '#7fd45a', sample: 'Invoke-CMClientAction', learn: 'https://learn.microsoft.com/powershell/module/configurationmanager/{name}', extra: { label: 'Site role', field: 'r', warn: '' } },
 ];
 
 const readJson = async (p) => JSON.parse(await readFile(p, 'utf8'));
-const jsonFiles = async (dir) => (await readdir(dir)).filter((f) => f.endsWith('.json'));
 const clip = (s) => {
   if (!s) return '';
   s = String(s).replace(/\s+/g, ' ').trim();
@@ -34,51 +34,36 @@ const clip = (s) => {
 };
 
 /**
- * Each kind reads its pipeline output and returns uniform rows:
- *   { n: name, v: verb, m: module/product, c: category, f: detail file, x: extra, p: permission count, e: flag, desc }
- * in display order, and copies its detail files to public/data/<source>/.
+ * Copy a source's module files to public/data/<source>/ and return its rows, sorted by name:
+ *   { n: name, v: verb, m: module, c: category, f: module file, x: extra, p: permission count, e: has examples, desc }
  */
-const LOADERS = {
-  async cmdlet(dir, out) {
-    const manifest = await readJson(join(dir, 'manifest.json'));
-    const descriptions = await readJson(join(dir, 'descriptions.json')).catch(() => ({}));
-    // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
-    const holders = new Map();
-    for (const f of await jsonFiles(join(dir, 'modules'))) {
-      const stem = basename(f, '.json');
-      const body = await readJson(join(dir, 'modules', f));
-      for (const [name, c] of Object.entries(body.cmdlets)) {
-        holders.set(name, [...(holders.get(name) ?? []), stem]);
-        c.description ??= descriptions[name];
-      }
-      await writeFile(join(out, f), JSON.stringify(body));
+async function loadRows(src, out) {
+  const dir = join(DATA, src.id);
+  const manifest = await readJson(join(dir, 'manifest.json'));
+  const descriptions = await readJson(join(dir, 'descriptions.json')).catch(() => ({}));
+  // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
+  const holders = new Map();
+  for (const f of (await readdir(join(dir, 'modules'))).filter((f) => f.endsWith('.json'))) {
+    const stem = basename(f, '.json');
+    const body = await readJson(join(dir, 'modules', f));
+    for (const [name, c] of Object.entries(body.cmdlets)) {
+      holders.set(name, [...(holders.get(name) ?? []), stem]);
+      c.description ??= descriptions[name];
     }
-    const rows = manifest.d.map((r) => {
-      const files = (holders.get(r.n) ?? []).sort();
-      return {
-        n: r.n, v: r.v, m: r.m, c: r.c, x: r.a ?? r.r, p: r.p, e: r.e, desc: descriptions[r.n],
-        f: files.includes(r.m) ? r.m : files[0], // prefer the file named after the row's own module
-      };
-    });
-    const missing = rows.filter((r) => !r.f).length;
-    if (missing) console.warn(`    ${missing} cmdlets have no detail file`);
-    return { version: manifest.v, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
-  },
-
-  async error(dir, out) {
-    const manifest = await readJson(join(dir, 'manifest.json'));
-    const descriptions = await readJson(join(dir, 'descriptions.json')).catch(() => ({}));
-    for (const f of await jsonFiles(join(dir, 'products'))) {
-      await writeFile(join(out, f), JSON.stringify(await readJson(join(dir, 'products', f))));
-    }
-    const rows = manifest.d.map((r) => ({
-      n: r.c, m: r.p, c: r.t, e: r.h, desc: r.m || descriptions[`${r.p}::${r.c}`],
-      f: r.p.toLowerCase().replace(/\s+/g, '-'),
-    }));
-    // Grouped by product, so neighbouring codes are related codes.
-    return { version: manifest.updated, rows: rows.sort((a, b) => a.m.localeCompare(b.m) || a.n.localeCompare(b.n)) };
-  },
-};
+    await writeFile(join(out, f), JSON.stringify(body));
+  }
+  const rows = manifest.d.map((r) => {
+    const files = (holders.get(r.n) ?? []).sort();
+    return {
+      n: r.n, v: r.v, m: r.m, c: r.c, p: r.p, e: r.e, desc: descriptions[r.n],
+      x: src.extra ? r[src.extra.field] : '',
+      f: files.includes(r.m) ? r.m : files[0], // prefer the file named after the row's own module
+    };
+  });
+  const missing = rows.filter((r) => !r.f).length;
+  if (missing) console.warn(`    ${missing} cmdlets have no detail file`);
+  return { version: manifest.v, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
+}
 
 function interner() {
   const list = [];
@@ -119,19 +104,20 @@ async function main() {
   for (const src of SOURCES) {
     const out = join(OUT_DATA, src.id);
     await mkdir(out, { recursive: true });
-    const { version, rows } = await LOADERS[src.kind](join(DATA, src.id), out);
+    const { version, rows } = await loadRows(src, out);
     const { index, desc } = buildShard(rows);
     await writeFile(join(OUT_IDX, `${src.id}.json`), JSON.stringify(index));
     await writeFile(join(OUT_IDX, `${src.id}.desc.json`), JSON.stringify(desc));
-    sources.push({ ...src, count: rows.length, version: version ?? '' });
-    console.log(`  ${src.id.padEnd(9)} ${String(rows.length).padStart(6)} entries`);
+    const { extra, ...meta } = src;
+    sources.push({ ...meta, extraLabel: extra?.label ?? '', extraWarn: extra?.warn ?? '', count: rows.length, version: version ?? '' });
+    console.log(`  ${src.id.padEnd(9)} ${String(rows.length).padStart(6)} cmdlets`);
   }
   const total = sources.reduce((a, s) => a + s.count, 0);
   // Shards are fetched as /idx/<id>.json?v=<build>; the id is bundled into the app, so HTML,
   // worker, index and descriptions always come from the same build.
   const build = Date.now().toString(36);
   await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ build, total, sources }, null, 2) + '\n');
-  console.log(`  ${total} entries indexed in ${Date.now() - t0} ms`);
+  console.log(`  ${total} cmdlets indexed in ${Date.now() - t0} ms`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

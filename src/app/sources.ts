@@ -1,64 +1,66 @@
 import generated from '../sources.generated.json';
-import type { Filters, SourceId, SourceKind, SourceMeta } from './types';
+import type { SourceId, SourceMeta } from './types';
 
 /** The source list, bundled at build time into both the page and the worker (see scripts/build-index.mjs). */
 export const SOURCES = generated.sources as SourceMeta[];
 export const TOTAL = generated.total;
 export const BUILD = generated.build;
 
-const byId = new Map(SOURCES.map((s) => [s.id, s]));
-export const sourceMeta = (id: SourceId): SourceMeta | undefined => byId.get(id);
-
-const ALL_COLOR = '#b9c3d6';
-export const sourceColor = (id: Filters['source']) => byId.get(id)?.color ?? ALL_COLOR;
-
-/** Inline style that tints an element (and its descendants) with a source's hue. */
-export const srcStyle = (id: Filters['source']) => ({ '--src': sourceColor(id) });
-
-/**
- * Behaviour that differs between cmdlet and error sources. "All" behaves like cmdlets:
- * its filter bar offers verbs and examples.
- */
-export interface KindSpec {
-  moduleLabel: string;
-  flagLabel: string;
-  hasVerbs: boolean;
-  versionPrefix: string;
-  placeholder: (s: SourceMeta) => string;
-  /** Lower-cased search key for a name (error codes ignore a leading 0x or minus). */
-  normalize: (s: string) => string;
-  /** Related entries: other verbs of the same noun, or neighbouring codes of the same product. */
-  related: 'noun' | 'neighbours';
-  relatedTitle: (name: string) => string;
-  /** The qualifier shown at the end of a result row. */
-  rowTag: (r: { module: string; extra: string; dup: boolean }) => string;
-}
-
 const fmt = new Intl.NumberFormat('en-US');
 
-export const KINDS: Record<SourceKind, KindSpec> = {
-  cmdlet: {
-    moduleLabel: 'Module',
-    flagLabel: 'Has examples',
-    hasVerbs: true,
-    versionPrefix: 'v',
-    placeholder: (s) => `Search ${fmt.format(s.count)} ${s.short} cmdlets`,
-    normalize: (s) => s.toLowerCase(),
-    related: 'noun',
-    relatedTitle: (name) => `Same noun · ${name.slice(name.indexOf('-') + 1)}`,
-    rowTag: (r) => (r.dup ? r.module : r.extra === 'beta' ? 'beta' : ''),
-  },
-  error: {
-    moduleLabel: 'Product',
-    flagLabel: 'Has resolution',
-    hasVerbs: false,
-    versionPrefix: 'updated ',
-    placeholder: () => 'Search error codes or messages: AADSTS50126, 0x80240017…',
-    normalize: (s) => s.toLowerCase().replace(/^0x/, '').replace(/^-/, ''),
-    related: 'neighbours',
-    relatedTitle: () => 'Nearby codes',
-    rowTag: (r) => r.module,
-  },
+/** The extra value a source flags as a caution, e.g. Graph's "beta" API. */
+export const isWarnExtra = (s: SourceMeta, extra: string) => !!s.extraWarn && extra === s.extraWarn;
+
+/** Query tokens as both the worker and the highlighter split them. */
+export const queryTokens = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean);
+
+/**
+ * What the UI is searching: one source, or every source ("all"). Everything that differs
+ * between the two is a property here, so callers never special-case "all".
+ */
+export interface Scope {
+  id: SourceId;
+  color: string;
+  placeholder: string;
+  /** " in Graph", or '' for every source. */
+  inLabel: string;
+  /** Label of the source's extra facet ('' = none, including "all"). */
+  extraLabel: string;
+  sources: SourceMeta[];
+  /** Module and extra facets only make sense within one source. */
+  perSourceFacets: boolean;
+}
+
+export const ALL: Scope = {
+  id: 'all',
+  color: '#b9c3d6',
+  placeholder: `Search ${fmt.format(TOTAL)} cmdlets`,
+  inLabel: '',
+  extraLabel: '',
+  sources: SOURCES,
+  perSourceFacets: false,
 };
 
-export const kindOf = (id: Filters['source']): KindSpec => KINDS[byId.get(id)?.kind ?? 'cmdlet'];
+const SCOPES = new Map<SourceId, Scope>([
+  [ALL.id, ALL],
+  ...SOURCES.map((s): [SourceId, Scope] => [s.id, {
+    id: s.id,
+    color: s.color,
+    placeholder: `Search ${fmt.format(s.count)} ${s.short} cmdlets`,
+    inLabel: ` in ${s.short}`,
+    extraLabel: s.extraLabel,
+    sources: [s],
+    perSourceFacets: true,
+  }]),
+]);
+
+export const isScope = (id: string) => SCOPES.has(id);
+/** Unknown ids (stale links) fall back to every source. */
+export const scopeOf = (id: SourceId): Scope => SCOPES.get(id) ?? ALL;
+
+const META = new Map(SOURCES.map((s) => [s.id, s]));
+/** Rows only come from the worker, which only knows SOURCES, so a row's source always resolves. */
+export const sourceOf = (id: SourceId): SourceMeta => META.get(id)!;
+
+/** Inline style that tints an element (and its descendants) with a scope's or source's hue. */
+export const srcStyle = (id: SourceId) => ({ '--src': scopeOf(id).color });

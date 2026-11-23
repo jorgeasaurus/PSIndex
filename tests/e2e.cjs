@@ -28,7 +28,7 @@ async function run(browser) {
   // Search across all sources, open the top hit with the keyboard.
   await p.goto(BASE);
   await rowsReady(p);
-  check(/43,1\d\d results/.test(await p.textContent('.count')), 'loads every source', await p.textContent('.count'));
+  check(/40,9\d\d results/.test(await p.textContent('.count')), 'loads every source', await p.textContent('.count'));
   await p.fill('input[type=search]', 'getmguser');
   await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent === 'Get-MgUser');
   await p.keyboard.press('Enter');
@@ -37,12 +37,10 @@ async function run(browser) {
   check((await p.locator('.params tbody tr').count()) > 3, 'syntax parsed into parameters');
   check(new URL(p.url()).searchParams.get('c') === 'graph:Get-MgUser', 'open entry is in the URL');
 
-  // Error code detail.
-  await p.goto(`${BASE}/?s=errors&q=AADSTS50126`);
-  await rowsReady(p);
-  await p.click('.result >> nth=0');
-  await p.waitForSelector('.detail h3:has-text("Resolution")');
-  check((await p.textContent('.detail-title code')) === 'AADSTS50126', 'error code detail renders');
+  // MECM documents its parameters; their descriptions render.
+  await p.goto(`${BASE}/?c=mecm:Invoke-CMClientAction`);
+  await p.waitForSelector('.detail .param-desc');
+  check((await p.textContent('.detail-title code')) === 'Invoke-CMClientAction', 'documented parameters render');
 
   // Duplicate names: distinct rows, labelled, each opening its own module.
   await p.goto(`${BASE}/?s=exchange&q=Get-CsExternalAccessPolicy`);
@@ -67,12 +65,14 @@ async function run(browser) {
   const c = new URL(p.url()).searchParams.get('c');
   check(c.includes('@') && (await p.locator('.result.is-open').count()) === 1, 'legacy link is canonicalised', c);
 
-  // Verb / examples filters do not leak into error codes.
-  await p.goto(`${BASE}/?s=graph&verb=Get&ex=1`);
+  // Switching source keeps the verb filter and drops source-specific ones (module, API).
+  await p.goto(`${BASE}/?s=graph&verb=Remove&ver=beta`);
   await rowsReady(p);
-  await p.click('.source:has-text("Errors")');
+  await p.click('.source:has-text("Az")');
   await p.waitForTimeout(400);
-  check(/2,2\d\d results/.test(await p.textContent('.count')), 'switching to Errors drops cmdlet-only filters', await p.textContent('.count'));
+  const u = new URL(p.url()).searchParams;
+  check(u.get('s') === 'az' && u.get('verb') === 'Remove' && !u.get('ver'), 'source switch keeps verb, drops API filter', u.toString());
+  check((await p.locator('.result .result-name').first().textContent()).startsWith('Remove-Az'), 'verb filter applies to the new source');
 
   // Scrolling deep through "All" never leaves the viewport as skeletons.
   await p.goto(BASE);

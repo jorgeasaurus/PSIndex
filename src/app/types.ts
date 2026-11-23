@@ -1,14 +1,13 @@
 /** Source ids come from scripts/build-index.mjs (SOURCES); they are data, not a hand-kept union. */
 export type SourceId = string;
-export type SourceKind = 'cmdlet' | 'error';
 
 export interface SourceMeta {
   id: SourceId;
   label: string;
   short: string;
-  kind: SourceKind;
   color: string;
   extraLabel: string; // name of the shard's `x` facet for this source ('' = no such facet)
+  extraWarn: string; // `x` value shown as a caution, e.g. 'beta' ('' = none)
   learn: string; // Microsoft Learn URL template with {module} / {name}, or '' for none
   sample: string; // example search shown on the intro panel
   count: number;
@@ -17,14 +16,14 @@ export interface SourceMeta {
 
 /** Columnar index shard written by scripts/build-index.mjs. */
 export interface IndexShard {
-  n: string[]; // names (cmdlet name or error code)
+  n: string[]; // cmdlet names
   v: number[]; // verb id
-  m: number[]; // module id (product for errors)
+  m: number[]; // module id
   c: number[]; // category id
   f: number[]; // detail file id
   x: number[]; // extra id: api version (graph/entra) or site role (mecm)
   p: number[]; // permission count (graph)
-  e: number[]; // has examples / has resolution
+  e: number[]; // has examples
   verbs: string[];
   mods: string[];
   cats: string[];
@@ -32,7 +31,7 @@ export interface IndexShard {
   extras: string[];
 }
 
-/** Detail files under public/data/<source>/, as written by the pipelines. */
+/** Module files under public/data/<source>/, as written by the pipelines. */
 export interface CmdletDetail {
   syntax?: string;
   examples?: string[];
@@ -40,15 +39,7 @@ export interface CmdletDetail {
   parameters?: { name: string; type: string; required: boolean; description?: string }[];
   description?: string;
 }
-export interface ErrorDetail {
-  message: string;
-  description: string;
-  resolution: string;
-  category: string;
-  source_file: string;
-}
 export interface CmdletFile { module: string; cmdlets: Record<string, CmdletDetail> }
-export interface ErrorFile { product: string; errors: Record<string, ErrorDetail> }
 
 export interface Filters {
   source: SourceId | 'all';

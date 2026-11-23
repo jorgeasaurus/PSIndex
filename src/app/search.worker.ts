@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { BUILD, KINDS, SOURCES, type KindSpec } from './sources';
+import { BUILD, SOURCES, queryTokens, scopeOf } from './sources';
 import type { Facets, Filters, FromWorker, IndexShard, Row, ToWorker } from './types';
 
 const SHIFT = 20; // ref = (sourceIndex << SHIFT) | rowIndex
@@ -8,12 +8,11 @@ const ROW_MASK = (1 << SHIFT) - 1;
 interface Loaded {
   si: number;
   id: string;
-  kind: KindSpec;
   shard: IndexShard;
   lname: string[];
   lflat: string[]; // name without hyphens, so "getmguser" finds Get-MgUser
   lnoun: string[];
-  keys: string[]; // stable row identity; disambiguated by module when a name repeats in a source
+  dup: Uint8Array; // 1 where the name repeats within this source (Entra v1.0/beta, Teams/Skype…)
   desc: string[] | null;
   ldesc: string[] | null;
 }
@@ -25,6 +24,17 @@ const post = (m: FromWorker, transfer: Transferable[] = []) => (self as Dedicate
 const encodeRef = (L: Loaded, i: number) => (L.si << SHIFT) | i;
 const decodeRef = (ref: number): [Loaded, number] => [loaded![ref >>> SHIFT], ref & ROW_MASK];
 
+/**
+ * Row identity used in links: `source:name`, qualified as `source:name@module` when the name
+ * repeats within its source. Cmdlet names never contain ':' or '@'.
+ */
+const keyOf = (L: Loaded, i: number) => `${L.id}:${L.shard.n[i]}${L.dup[i] ? '@' + L.shard.mods[L.shard.m[i]] : ''}`;
+function parseKey(key: string) {
+  const [source, rest = ''] = key.split(':');
+  const [name, module = ''] = rest.split('@');
+  return { source, name, module };
+}
+
 async function getJson<T>(file: string): Promise<T> {
   const url = new URL(`/idx/${file}`, self.location.origin);
   url.searchParams.set('v', BUILD); // same build as this worker, so shards never mix across deploys
@@ -34,21 +44,19 @@ async function getJson<T>(file: string): Promise<T> {
 }
 
 async function loadSource(si: number): Promise<Loaded> {
-  const { id, kind } = SOURCES[si];
-  const spec = KINDS[kind];
+  const { id } = SOURCES[si];
   const shard = await getJson<IndexShard>(`${id}.json`);
-  const lname = shard.n.map(spec.normalize);
+  const lname = shard.n.map((n) => n.toLowerCase());
   const count = new Map<string, number>();
   for (const n of shard.n) count.set(n, (count.get(n) ?? 0) + 1);
   return {
     si,
     id,
-    kind: spec,
     shard,
     lname,
     lflat: lname.map((n) => n.replace(/-/g, '')),
-    lnoun: shard.n.map((n) => (n.indexOf('-') > 0 ? n.slice(n.indexOf('-') + 1).toLowerCase() : '')),
-    keys: shard.n.map((n, i) => (count.get(n)! > 1 ? `${id}:${n}@${shard.mods[shard.m[i]]}` : `${id}:${n}`)),
+    lnoun: lname.map((n) => (n.indexOf('-') > 0 ? n.slice(n.indexOf('-') + 1) : '')),
+    dup: Uint8Array.from(shard.n, (n) => (count.get(n)! > 1 ? 1 : 0)),
     desc: null,
     ldesc: null,
   };
@@ -89,9 +97,9 @@ function fuzzy(t: string, s: string): number {
   return score;
 }
 
-function scoreToken(t: string, L: Loaded, i: number): number {
+/** `t` is a lower-cased query token (see queryTokens). */
+function scoreToken(tt: string, L: Loaded, i: number): number {
   const name = L.lname[i];
-  const tt = L.kind.normalize(t);
   if (name === tt) return 1000;
   if (name.startsWith(tt)) return 800 - Math.min(100, name.length - tt.length);
   const noun = L.lnoun[i];
@@ -109,7 +117,7 @@ function scoreToken(t: string, L: Loaded, i: number): number {
     const perfect = (tt.length * (tt.length + 1)) / 2;
     if (f >= perfect * 0.45) return 120 + Math.round((f / perfect) * 80) - Math.min(60, name.length - tt.length);
   }
-  if (L.ldesc?.[i].includes(t)) return 60;
+  if (L.ldesc?.[i].includes(tt)) return 60;
   return 0;
 }
 
@@ -124,22 +132,23 @@ function passes(L: Loaded, i: number, f: Filters): boolean {
   );
 }
 
-function facetsFor(scope: Loaded[], all: boolean): Facets {
+function facetsFor(scope: Loaded[], perSource: boolean): Facets {
   const uniq = (pick: (s: IndexShard) => string[]) =>
     [...new Set(scope.flatMap((L) => pick(L.shard)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   return {
     verbs: uniq((s) => s.verbs),
-    modules: all ? [] : uniq((s) => s.mods),
+    modules: perSource ? uniq((s) => s.mods) : [],
     categories: uniq((s) => s.cats),
-    extras: all ? [] : uniq((s) => s.extras),
+    extras: perSource ? uniq((s) => s.extras) : [],
   };
 }
 
 function runSearch({ id, q, filters }: { id: number; q: string; filters: Filters }) {
   if (!loaded) return;
   const t0 = performance.now();
-  const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const scope = filters.source === 'all' ? loaded : loaded.filter((L) => L.id === filters.source);
+  const tokens = queryTokens(q);
+  const { sources, perSourceFacets } = scopeOf(filters.source);
+  const scope = loaded.filter((L) => sources.some((s) => s.id === L.id));
   const hits: { ref: number; score: number; len: number }[] = [];
   for (const L of scope) {
     for (let i = 0; i < L.shard.n.length; i++) {
@@ -155,14 +164,14 @@ function runSearch({ id, q, filters }: { id: number; q: string; filters: Filters
   }
   if (tokens.length) hits.sort((a, b) => b.score - a.score || a.len - b.len || a.ref - b.ref);
   const refs = Int32Array.from(hits, (h) => h.ref);
-  post({ type: 'results', id, refs, facets: facetsFor(scope, filters.source === 'all'), ms: performance.now() - t0 }, [refs.buffer]);
+  post({ type: 'results', id, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0 }, [refs.buffer]);
 }
 
 function rowOf(ref: number): Row {
   const [L, i] = decodeRef(ref);
   const s = L.shard;
   return {
-    key: L.keys[i],
+    key: keyOf(L, i),
     source: L.id,
     name: s.n[i],
     verb: s.verbs[s.v[i]],
@@ -173,20 +182,26 @@ function rowOf(ref: number): Row {
     perms: s.p[i],
     examples: !!s.e[i],
     desc: L.desc?.[i] ?? '',
-    dup: L.keys[i].includes('@'),
+    dup: !!L.dup[i],
   };
 }
 
-/** Exact key, else the name (an old link, or a module qualifier that no longer applies), else case-insensitive. */
+/**
+ * Resolve a link key: the row with that name and module, else the first row with that name
+ * (an old unqualified link, or a module that no longer applies). Names match case-insensitively.
+ */
 function refOfKey(key: string): number | null {
-  const c = key.indexOf(':');
-  const L = loaded!.find((x) => x.id === key.slice(0, c));
+  const { source, name, module } = parseKey(key);
+  const L = loaded!.find((x) => x.id === source);
   if (!L) return null;
-  const name = key.slice(c + 1).split('@')[0];
   const lower = name.toLowerCase();
-  const candidates = [L.keys.indexOf(key), L.shard.n.indexOf(name), L.shard.n.findIndex((n) => n.toLowerCase() === lower)];
-  const i = candidates.find((x) => x >= 0);
-  return i === undefined ? null : encodeRef(L, i);
+  let first = -1;
+  for (let i = 0; i < L.lname.length; i++) {
+    if (L.lname[i] !== lower) continue;
+    if (!module || L.shard.mods[L.shard.m[i]] === module) return encodeRef(L, i);
+    if (first < 0) first = i;
+  }
+  return first < 0 ? null : encodeRef(L, first);
 }
 
 function related(key: string): Row[] {
@@ -194,12 +209,6 @@ function related(key: string): Row[] {
   if (ref === null) return [];
   const [L, i] = decodeRef(ref);
   const out: Row[] = [];
-  if (L.kind.related === 'neighbours') {
-    for (let j = Math.max(0, i - 6); j < Math.min(L.shard.n.length, i + 7); j++) {
-      if (j !== i && L.shard.m[j] === L.shard.m[i]) out.push(rowOf(encodeRef(L, j)));
-    }
-    return out;
-  }
   const noun = L.lnoun[i];
   for (let j = 0; noun && j < L.shard.n.length && out.length < 30; j++) {
     if (j !== i && L.lnoun[j] === noun) out.push(rowOf(encodeRef(L, j)));

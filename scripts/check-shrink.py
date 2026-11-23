@@ -35,7 +35,7 @@ if drop > limit:
     sys.exit(1)
 
 # A version that disappears means a lookup (e.g. PowerShell Gallery) failed, not a real release.
-old_v, new_v = old_doc.get("v") or old_doc.get("updated"), new_doc.get("v") or new_doc.get("updated")
+old_v, new_v = old_doc.get("v"), new_doc.get("v")
 if old_v and old_v != "0.0.0" and (not new_v or new_v == "0.0.0"):
     print(f"::error::{src} version went from {old_v!r} to {new_v!r}; refusing to commit a degraded refresh")
     sys.exit(1)

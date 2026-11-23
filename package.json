@@ -1,7 +1,7 @@
 {
   "name": "psindex",
   "version": "1.0.0",
-  "description": "One searchable index of Microsoft Graph, Az, Entra, Exchange, MECM PowerShell cmdlets and Microsoft error codes.",
+  "description": "One searchable index of Microsoft Graph, Az, Entra, Exchange and MECM PowerShell cmdlets.",
   "scripts": {
     "index": "node scripts/build-index.mjs",
     "dev": "npm run index && astro dev",

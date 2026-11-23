@@ -5,17 +5,16 @@
 const RAMP = ' .·:-=+*%#@';
 const SIGILS = '$|{}<>;'; // PowerShell punctuation sprinkled into the densest cells
 
-export interface FieldOptions {
-  canvas: HTMLCanvasElement;
-  cell?: number;
-}
+export type Theme = 'light' | 'dark';
 
 interface Ripple { x: number; y: number; t0: number; amp: number }
 
 export class AsciiField {
   private ctx: CanvasRenderingContext2D;
   private atlas: HTMLCanvasElement;
-  private cell: number;
+  private cell = 14;
+  private qpad = 18; // how far the field fades out around quiet zones
+  private headerFade = 0.5; // fraction of the viewport where the field is at full strength
   private cols = 0;
   private rows = 0;
   private dpr = 1;
@@ -31,10 +30,10 @@ export class AsciiField {
   private running = false;
   private quiet: DOMRect[] = [];
 
-  constructor(private opts: FieldOptions) {
-    this.ctx = opts.canvas.getContext('2d', { alpha: true })!;
+  /** `quietSelector` marks elements the field steps back from, so text over it stays clean. */
+  constructor(private canvas: HTMLCanvasElement, private quietSelector = '[data-quiet]') {
+    this.ctx = canvas.getContext('2d', { alpha: true })!;
     this.atlas = document.createElement('canvas');
-    this.cell = opts.cell ?? 14;
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.resize = this.resize.bind(this);
     this.frame = this.frame.bind(this);
@@ -46,26 +45,18 @@ export class AsciiField {
       this.reduced ? (this.stop(), this.draw(performance.now())) : this.start();
     });
     this.resize();
+    // Web fonts change both the glyphs and the layout of the quiet zones.
+    document.fonts?.ready.then(() => this.resize());
   }
 
-  /** Tint the field (source colour) and set overall strength 0..1. */
-  setTone(color: string, dim = this.dim) {
+  /** Tint the field with a source colour, for the current theme (darker glyphs on the light ground). */
+  setTone(hex: string, theme: Theme) {
+    const color = theme === 'light' ? scaleHex(hex, 0.62) : hex;
+    const dim = theme === 'light' ? 0.85 : 0.78;
     if (color === this.color && dim === this.dim) return;
     this.color = color;
     this.dim = dim;
     this.bakeAtlas();
-    if (this.reduced) this.draw(performance.now());
-  }
-
-  /** Re-render the glyph atlas (call once web fonts have loaded). */
-  refresh() {
-    this.bakeAtlas();
-    this.draw(performance.now());
-  }
-
-  /** Areas where the field steps back so text on top stays clean (wordmark, tagline...). */
-  setQuiet(rects: DOMRect[]) {
-    this.quiet = rects;
     if (this.reduced) this.draw(performance.now());
   }
 
@@ -87,10 +78,14 @@ export class AsciiField {
   }
 
   private resize() {
-    const c = this.opts.canvas;
+    const c = this.canvas;
     this.dpr = Math.min(2, devicePixelRatio || 1);
     const w = innerWidth, h = innerHeight;
-    this.cell = w < 640 ? 12 : 14;
+    const narrow = w < 640;
+    this.cell = narrow ? 12 : 14;
+    this.qpad = narrow ? 6 : 18;
+    this.headerFade = Math.min(1, (narrow ? 520 : 420) / Math.max(1, h));
+    this.quiet = [...document.querySelectorAll(this.quietSelector)].map((el) => el.getBoundingClientRect());
     c.width = Math.round(w * this.dpr);
     c.height = Math.round(h * this.dpr);
     c.style.width = w + 'px';
@@ -131,7 +126,7 @@ export class AsciiField {
 
   private draw(now: number) {
     const { ctx, cols, rows, cell, dpr, glyphW } = this;
-    const W = this.opts.canvas.width, H = this.opts.canvas.height;
+    const W = this.canvas.width, H = this.canvas.height;
     ctx.clearRect(0, 0, W, H);
     const t = (this.reduced ? 0 : now / 1000) + this.seed;
     const step = cell * dpr;
@@ -139,7 +134,7 @@ export class AsciiField {
     const mx = this.mouse.x, my = this.mouse.y;
     const live = this.ripples.filter((r) => now - r.t0 < 2200);
     this.ripples = live;
-    const headerFade = Math.min(1, (innerWidth < 640 ? 520 : 420) / Math.max(1, innerHeight)); // field is strongest in the top band
+    const { headerFade, qpad } = this;
 
     for (let y = 0; y < rows; y++) {
       const py = y * cell;
@@ -164,7 +159,6 @@ export class AsciiField {
         const md = Math.hypot(px - mx, py - my);
         if (md < 160) val += (1 - md / 160) * 0.45;
         val *= fall;
-        const qpad = innerWidth < 640 ? 6 : 18;
         for (const q of this.quiet) {
           const dx = Math.max(q.left - px, 0, px - q.right);
           const dy = Math.max(q.top - py, 0, py - q.bottom);
@@ -178,4 +172,10 @@ export class AsciiField {
       }
     }
   }
+}
+
+/** Multiply each RGB channel of a #rrggbb colour by k. */
+function scaleHex(hex: string, k: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * k).toString(16).padStart(2, '0')).join('');
 }

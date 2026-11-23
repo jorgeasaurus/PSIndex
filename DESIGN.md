@@ -1,6 +1,6 @@
 ---
 name: PSIndex
-description: One search field over 43k Microsoft PowerShell cmdlets and error codes, set over a live ASCII contour field.
+description: One search field over 41k Microsoft PowerShell cmdlets, set over a live ASCII contour field.
 colors:
   ground-night: "#090c13"
   surface-night: "#0d111a"
@@ -22,7 +22,6 @@ colors:
   source-entra: "#2fd0b5"
   source-exchange: "#f2b33d"
   source-mecm: "#7fd45a"
-  source-errors: "#ff7a6b"
   source-all: "#b9c3d6"
   danger-night: "#ff8b7d"
   danger-day: "#b3261e"
@@ -145,16 +144,16 @@ Density is high and familiar on purpose. Admins arrive mid-task; the interface m
 
 **Key Characteristics:**
 - Search-first band; the field is strongest there and steps back around text (quiet zones).
-- Six source hues do real work: tab state, row markers, field tint, focus and caret colour.
+- Five source hues do real work: tab state, row markers, field tint, focus and caret colour.
 - Mono for things you type or copy (names, syntax, search input); sans for everything else.
 - Hairline-bordered panes on a tinted ground; no decorative chrome.
 
 ## Colors
 
-Restrained neutrals tinted blue-black (night) or cool grey (day), carrying a six-hue source palette that is used for state and identity, never for decoration.
+Restrained neutrals tinted blue-black (night) or cool grey (day), carrying a five-hue source palette that is used for state and identity, never for decoration.
 
 ### Primary
-- **Source hues**: Graph violet (#9b8cff), Az azure (#4cb3ff), Entra teal (#2fd0b5), Exchange amber (#f2b33d), MECM green (#7fd45a), Errors coral (#ff7a6b), All steel (#b9c3d6). Exposed as `--src` on the app root and on each row, tab and detail pane. Text-weight uses mix the hue toward white (night) or black (day) via `color-mix(in oklab, var(--src) 70–80%, var(--ink-mix))` so it stays legible.
+- **Source hues**: Graph violet (#9b8cff), Az azure (#4cb3ff), Entra teal (#2fd0b5), Exchange amber (#f2b33d), MECM green (#7fd45a), All steel (#b9c3d6). Exposed as `--src` on the app root and on each row, tab and detail pane. Text-weight uses mix the hue toward white (night) or black (day) via `color-mix(in oklab, var(--src) 70–80%, var(--ink-mix))` so it stays legible.
 
 ### Neutral
 - **Night ground** (#090c13), **night surfaces** (#0d111a at 93% alpha, #151b28, #1b2232), **code well** (#0a0e16).
@@ -176,11 +175,11 @@ Restrained neutrals tinted blue-black (night) or cool grey (day), carrying a six
 
 ### Hierarchy
 - **Headline** (600, 28px, 1.15, -0.025em): idle-pane heading only.
-- **Title-code** (600 mono, 26px; 21px mobile): the open cmdlet or error code. Wraps anywhere; Graph names run long.
+- **Title-code** (600 mono, 26px; 21px mobile): the open cmdlet. Wraps anywhere; Graph names run long.
 - **Search** (500 mono, 18px; 16px mobile): the search input value. Placeholder falls back to the sans.
 - **Body** (400, 15px, 1.5–1.6): descriptions, max 72ch.
 - **Code** (400 mono, 13px, 1.65): syntax, examples, parameter names, result names (14px, 500).
-- **Label** (500, 13px): tabs, buttons, block headings (13px/600). **Caption** (500, 12px): tags, counts, table headers. **Body-sm** (14px): buttons, detail prose in errors, result names.
+- **Label** (500, 13px): tabs, buttons, block headings (13px/600). **Caption** (500, 12px): tags, counts, table headers. **Body-sm** (14px): buttons, result names.
 - **Scale:** 12 / 13 / 14 / 15 / 16 (mobile input) / 18 / 21 (mobile title) / 22 (wordmark) / 26 / 28. Nothing between steps.
 
 ### Named Rules
@@ -208,7 +207,7 @@ Radii: 6px tags and kbd, 8px selects and small copy buttons, 10px buttons and co
 - **Result row**: dot, mono name with query fragments highlighted by a 26% source tint, right-aligned meta (beta / product), one-line description. Hover/keyboard cursor: surface-2. Open: source tint.
 - **Detail**: mono title with copy, then a tag row led by the source tag (dot + short name), module, verb, category, API version and permission count; primary "Microsoft Learn" button (source-tinted) and quiet "Copy link"; then Syntax (one code well per parameter set), Parameters table (required/positional tags; pipeline and proxy params collapsed), Permissions (Graph), Examples, and Same-noun / Nearby-code links.
 - **Code well**: tokenised PowerShell (cmdlet, -Param, <Type>, $var, strings, comments), copy button pinned top-right.
-- **States**: skeleton shimmer rows while the index loads; skeleton blocks while detail loads; inline error notice with recovery copy; empty state that teaches (noun-only, fewer words, drop 0x) with a "search every source" reset.
+- **States**: skeleton shimmer rows while the index loads; skeleton blocks while detail loads; inline error notice with recovery copy; empty state that teaches (noun-only, fewer words) with a "search every source" reset.
 
 ## Do's and Don'ts
 
@@ -219,6 +218,6 @@ Radii: 6px tags and kbd, 8px selects and small copy buttons, 10px buttons and co
 
 **Don't**
 - Don't put the field behind panes at full strength, or let it reduce text contrast below AA.
-- Don't add a second accent or decorative colour outside the six source hues.
+- Don't add a second accent or decorative colour outside the five source hues.
 - Don't use glass/blur, gradient text, side-bar selection markers, or an eyebrow line above a heading.
 - Don't introduce a modal for detail on desktop; the detail pane is always in place.

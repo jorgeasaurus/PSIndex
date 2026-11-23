@@ -1,4 +1,4 @@
-import type { Filters, FromWorker, RequestType, Requests, Results, ToWorker } from './types';
+import type { CmdletFile, Filters, FromWorker, RequestType, Requests, Results, ToWorker } from './types';
 
 interface Handlers {
   onResults: (r: Results) => void;
@@ -48,19 +48,19 @@ export class SearchClient {
   }
 }
 
-const detailCache = new Map<string, Promise<unknown>>();
+const moduleCache = new Map<string, Promise<CmdletFile>>();
 
-/** Fetch (once) a detail file. `F` is the file shape the caller's source kind writes (see types.ts). */
-export function loadDetail<F>(source: string, file: string): Promise<F> {
+/** Fetch (once) a module file written by the build (public/data/<source>/<module>.json). */
+export function loadModule(source: string, file: string): Promise<CmdletFile> {
   const key = `${source}/${file}`;
-  let p = detailCache.get(key);
+  let p = moduleCache.get(key);
   if (!p) {
     p = fetch(`/data/${source}/${encodeURIComponent(file)}.json`).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     });
-    p.catch(() => detailCache.delete(key));
-    detailCache.set(key, p);
+    p.catch(() => moduleCache.delete(key));
+    moduleCache.set(key, p);
   }
-  return p as Promise<F>;
+  return p;
 }

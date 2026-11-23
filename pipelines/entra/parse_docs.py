@@ -22,6 +22,9 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common import keep_previous_versions  # noqa: E402
+
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
     ("Applications", "Application Management"),
@@ -312,6 +315,7 @@ def main():
     # Fetch module versions from PowerShell Gallery
     unique_modules = sorted(set(c["module"] for c in all_cmdlets))
     module_versions = fetch_all_module_versions(unique_modules)
+    keep_previous_versions(module_versions, unique_modules, data_dir)
 
     # Build slim manifest (short keys, no descriptions or moduleVersion)
     DEFAULT_DESC = "Microsoft Entra PowerShell cmdlet."

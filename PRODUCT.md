@@ -12,15 +12,15 @@ Astro (static output) with one Preact island for the search app, deployed on Ver
 
 ## Users
 
-IT and Microsoft 365 administrators in the middle of a task: writing or debugging a PowerShell script, or reading an error code someone pasted into a ticket. They need the exact cmdlet name, its syntax, the parameters, a working example, the Graph permissions, or what an error code means. Lookup speed matters more than browsing.
+IT and Microsoft 365 administrators in the middle of a task: writing or debugging a PowerShell script. They need the exact cmdlet name, its syntax, the parameters, a working example, or the Graph permissions. Lookup speed matters more than browsing.
 
 ## Product Purpose
 
-PSIndex is one searchable reference for the PowerShell surfaces an M365/endpoint admin uses: Microsoft Graph, Az, Entra, Exchange/Teams/SharePoint, Configuration Manager (MECM), plus Microsoft error codes. It replaces six separate sites (MgGraphIndex, AzIndex, EntraIndex, ExchIndex, MecmIndex, ErrorIndex). Success: an admin types a fragment and gets the right command and its syntax in seconds, whichever product it belongs to.
+PSIndex is one searchable reference for the PowerShell surfaces an M365/endpoint admin uses: Microsoft Graph, Az, Entra, Exchange/Teams/SharePoint, and Configuration Manager (MECM). It replaces five separate sites (MgGraphIndex, AzIndex, EntraIndex, ExchIndex, MecmIndex). Error codes are out of scope (decided after launch); ErrorIndex remains a separate site. Success: an admin types a fragment and gets the right command and its syntax in seconds, whichever product it belongs to.
 
 ## Positioning
 
-Cross-product, instant, offline-friendly lookup. Microsoft Learn is per-product and slow to navigate. PSIndex searches 43k+ entries together, in the browser, with no backend.
+Cross-product, instant, offline-friendly lookup. Microsoft Learn is per-product and slow to navigate. PSIndex searches 41k cmdlets together, in the browser, with no backend.
 
 ## Operating Context
 
@@ -29,7 +29,7 @@ Used next to an editor or terminal, often on a second monitor, frequently opened
 ## Capabilities and Constraints
 
 - Search by name, noun, or description fragment; filter by source, verb, module, category, API version (Graph/Entra), and examples present.
-- Detail: syntax, parsed parameters, examples, permissions (Graph), link to Microsoft Learn; for errors: message, description, resolution, source doc.
+- Detail: syntax, parsed parameters, examples, permissions (Graph), link to Microsoft Learn.
 - Deep links via URL query parameters.
 - Static only. No accounts, no server.
 
