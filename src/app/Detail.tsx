@@ -76,7 +76,7 @@ function CmdletEntry({ row }: { row: Row }) {
     let live = true;
     loadModule(row.source, row.file)
       .then((file: CmdletFile) => {
-        const cmdlet = file.cmdlets[row.name];
+        const cmdlet = file[row.name];
         if (live) setState(cmdlet ? { status: 'ok', cmdlet } : { status: 'missing' });
       })
       .catch((e) => live && setState({ status: 'failed', message: e.message }));

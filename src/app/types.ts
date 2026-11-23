@@ -47,7 +47,8 @@ export interface CmdletDetail {
   parameters: DocumentedParam[];
   description: string;
 }
-export interface CmdletFile { module: string; cmdlets: Record<string, CmdletDetail> }
+/** A module file (public/data/<source>/<file>.json): its cmdlets by name. */
+export type CmdletFile = Record<string, CmdletDetail>;
 
 export interface Filters {
   source: SourceId; // a source id, or 'all'

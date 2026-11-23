@@ -39,7 +39,7 @@ const SOURCES: SourceDef[] = [
 interface Manifest { v: unknown; d: unknown }
 interface RawCmdlet { syntax?: unknown; examples?: unknown; permissions?: unknown; parameters?: unknown }
 type RawParam = { name: string; type: string; required: boolean; description?: string };
-interface RawModuleFile { module: string; cmdlets: Record<string, RawCmdlet> }
+interface RawModuleFile { cmdlets: unknown }
 
 /** One index row, before it is split into columns. */
 interface Row { n: string; v: string; m: string; c: string; f: string; x: string; p: number; e: boolean; desc: string }
@@ -55,7 +55,9 @@ const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) 
   typeof x?.name === 'string' && typeof x.type === 'string' && typeof x.required === 'boolean' && (x.description === undefined || typeof x.description === 'string'));
 
 /** The detail shape the app reads: every field present, so the UI never guesses. */
-function normalizeCmdlet(where: string, c: RawCmdlet, description: string): CmdletDetail {
+function normalizeCmdlet(where: string, raw: unknown, description: string): CmdletDetail {
+  if (typeof raw !== 'object' || raw === null) throw new Error(`${where}: not an object`);
+  const c: RawCmdlet = raw; // an object whose fields are all checked below
   if (typeof c.syntax !== 'string') throw new Error(`${where}: syntax is not a string`);
   if (!strings(c.examples)) throw new Error(`${where}: examples is not a list of strings`);
   if (c.permissions !== undefined && !strings(c.permissions)) throw new Error(`${where}: permissions is not a list of strings`);
@@ -106,10 +108,11 @@ async function loadRows(src: SourceDef, out: string): Promise<{ version: string;
   for (const f of (await readdir(join(dir, 'modules'))).filter((f) => f.endsWith('.json'))) {
     const stem = basename(f, '.json');
     const raw = await readJson<RawModuleFile>(join(dir, 'modules', f));
-    const file: CmdletFile = { module: raw.module, cmdlets: {} };
+    if (typeof raw.cmdlets !== 'object' || raw.cmdlets === null) throw new Error(`${src.id}/${f}: cmdlets is not an object`);
+    const file: CmdletFile = {};
     for (const [name, c] of Object.entries(raw.cmdlets)) {
       holders.set(name, [...(holders.get(name) ?? []), stem]);
-      file.cmdlets[name] = normalizeCmdlet(`${src.id}/${f} ${name}`, c, descriptions[name] ?? '');
+      file[name] = normalizeCmdlet(`${src.id}/${f} ${name}`, c, descriptions[name] ?? '');
     }
     await writeFile(join(out, f), JSON.stringify(file));
   }
