@@ -2,27 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { Search, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { SearchClient } from './client';
 import { AsciiField } from './ascii';
-import { ResultList } from './ResultList';
+import { ResultList, ResultsSkeleton } from './ResultList';
 import { Detail } from './Detail';
-import { SOURCE_COLORS, sourceColor } from './colors';
-import type { Facets, Filters, Row, SourceId, SourceMeta } from './types';
-
-interface Props {
-  sources: SourceMeta[];
-  total: number;
-}
+import { KINDS, SOURCES, TOTAL, kindOf, sourceColor, sourceMeta, srcStyle } from './sources';
+import type { Facets, Filters, Row, SourceId } from './types';
 
 const EMPTY_FILTERS: Filters = { source: 'all', verb: '', module: '', category: '', extra: '', examples: false };
 const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] };
 
 function readUrl(): { q: string; filters: Filters; open: string } {
   const p = new URLSearchParams(location.search);
-  const s = p.get('s') as Filters['source'] | null;
+  const s = p.get('s') ?? 'all';
   return {
     q: p.get('q') ?? '',
     open: p.get('c') ?? '',
     filters: {
-      source: s && (s === 'all' || s in SOURCE_COLORS) ? s : 'all',
+      source: sourceMeta(s) ? s : 'all',
       verb: p.get('verb') ?? '',
       module: p.get('module') ?? '',
       category: p.get('cat') ?? '',
@@ -49,7 +44,15 @@ function writeUrl(q: string, f: Filters, open: string) {
 
 const fmt = new Intl.NumberFormat('en-US');
 
-export default function App({ sources, total }: Props) {
+let measureCtx: CanvasRenderingContext2D | null = null;
+/** Width of `text` in `el`'s font, for placing the search ripple at the caret. */
+function textWidth(el: HTMLElement, text: string) {
+  measureCtx ??= document.createElement('canvas').getContext('2d')!;
+  measureCtx.font = getComputedStyle(el).font;
+  return measureCtx.measureText(text).width;
+}
+
+export default function App() {
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [refs, setRefs] = useState<Int32Array | null>(null);
@@ -61,10 +64,9 @@ export default function App({ sources, total }: Props) {
   const [descTick, setDescTick] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | null>(null);
-  const [booted, setBooted] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [client, setClient] = useState<SearchClient | null>(null); // created after mount; null while server-rendering
 
-  const client = useRef<SearchClient | undefined>(undefined);
   const field = useRef<AsciiField | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -75,12 +77,11 @@ export default function App({ sources, total }: Props) {
     setQ(initial.q);
     setFilters(initial.filters);
     setOpenKey(initial.open);
-    const c = new SearchClient();
-    client.current = c;
-    c.onResults = (r) => { setRefs(r.refs); setFacets(r.facets); setMs(r.ms); };
-    c.onDesc = () => setDescTick((t) => t + 1);
-    c.onLoadError = (msg) => setLoadError(msg);
-    setBooted(true);
+    setClient(new SearchClient({
+      onResults: (r) => { setRefs(r.refs); setFacets(r.facets); setMs(r.ms); },
+      onDescriptions: () => setDescTick((t) => t + 1),
+      onLoadError: setLoadError,
+    }));
     if (canvasRef.current) {
       const f = new AsciiField({ canvas: canvasRef.current });
       field.current = f;
@@ -100,26 +101,26 @@ export default function App({ sources, total }: Props) {
 
   // Run search whenever the query or filters change.
   useEffect(() => {
-    client.current?.search(q, filters);
+    client?.search(q, filters);
     setActive(0);
     writeUrl(q, filters, openKey);
-  }, [q, filters, booted]);
+  }, [q, filters, client]);
 
   useEffect(() => writeUrl(q, filters, openKey), [openKey]);
 
   // Resolve the open entry (deep links, clicks, keyboard).
   useEffect(() => {
     if (!openKey) { setOpenRow(null); return; }
-    if (openRow?.key === openKey) return;
+    if (!client || openRow?.key === openKey) return;
     let live = true; // a later click or close supersedes this lookup
-    client.current?.find(openKey).then((r) => {
+    client.request('find', { key: openKey }).then((r) => {
       if (!live) return;
       setOpenRow(r);
       // An old or unqualified link resolved to a row: adopt its canonical key so the row highlights and the URL updates.
       if (r && r.key !== openKey) setOpenKey(r.key);
     });
     return () => { live = false; };
-  }, [openKey, booted]);
+  }, [openKey, client]);
 
   // Source tint for the field; keep the active tab visible on narrow screens.
   useEffect(() => {
@@ -151,18 +152,15 @@ export default function App({ sources, total }: Props) {
     const el = inputRef.current;
     if (!el || !field.current) return;
     const r = el.getBoundingClientRect();
-    // Approximate caret x from text width.
-    const ctx = (pulseFromInput as any).ctx ?? ((pulseFromInput as any).ctx = document.createElement('canvas').getContext('2d'));
-    ctx.font = getComputedStyle(el).font;
-    const caret = Math.min(r.right - 24, r.left + parseFloat(getComputedStyle(el).paddingLeft) + ctx.measureText(el.value).width);
+    const caret = Math.min(r.right - 24, r.left + parseFloat(getComputedStyle(el).paddingLeft) + textWidth(el, el.value));
     field.current.pulse(caret, r.top + r.height / 2, 1);
   };
 
   const setFilter = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
-  // Verb and "has examples" carry across cmdlet sources, but mean nothing for error codes.
+  // Verb and the examples flag carry over between sources of the same kind; across kinds they mean different things.
   const setSource = (s: Filters['source']) =>
     setFilters((f) => {
-      const keep = s !== 'errors' && f.source !== 'errors';
+      const keep = kindOf(s) === kindOf(f.source);
       return { ...EMPTY_FILTERS, source: s, examples: keep && f.examples, verb: keep ? f.verb : '' };
     });
 
@@ -178,12 +176,12 @@ export default function App({ sources, total }: Props) {
   const onInputKey = async (e: KeyboardEvent) => {
     // The box is autofocused, so the "/" shortcut lands here; nobody searches for a leading slash.
     if (e.key === '/' && !(e.target as HTMLInputElement).value) { e.preventDefault(); return; }
-    if (!refs) return;
+    if (!refs || !client) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(refs.length - 1, a + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
     else if (e.key === 'Enter' && refs.length) {
       e.preventDefault();
-      const [row] = await client.current!.rows([refs[active]]);
+      const [row] = await client.request('rows', { refs: [refs[active]] });
       if (row) open(row);
     } else if (e.key === 'Escape') {
       if (openKey) close(); else if (q) setQ('');
@@ -191,10 +189,8 @@ export default function App({ sources, total }: Props) {
   };
 
   const activeFilterCount = [filters.verb, filters.module, filters.category, filters.extra, filters.examples].filter(Boolean).length;
-  const srcMeta = sources.find((s) => s.id === filters.source);
-  const placeholder = srcMeta
-    ? srcMeta.kind === 'error' ? 'Search error codes or messages: AADSTS50126, 0x80240017…' : `Search ${fmt.format(srcMeta.count)} ${srcMeta.short} cmdlets`
-    : `Search ${fmt.format(total)} cmdlets & errors`;
+  const srcMeta = sourceMeta(filters.source);
+  const placeholder = srcMeta ? KINDS[srcMeta.kind].placeholder(srcMeta) : `Search ${fmt.format(TOTAL)} cmdlets & errors`;
 
   const resultsLabel = loadError ? 'Index unavailable' : refs == null ? 'Loading index…' : `${fmt.format(refs.length)} ${refs.length === 1 ? 'result' : 'results'}`;
   const toggleTheme = () => {
@@ -203,7 +199,7 @@ export default function App({ sources, total }: Props) {
   };
 
   return (
-    <div class="app" data-source={filters.source} data-open={openKey ? '' : undefined}>
+    <div class="app" style={srcStyle(filters.source)} data-open={openKey ? '' : undefined}>
       <canvas ref={canvasRef} class="field" aria-hidden="true" />
 
       <header class="band">
@@ -243,8 +239,8 @@ export default function App({ sources, total }: Props) {
         </div>
 
         <nav class="sources" aria-label="Source">
-          <SourceTab id="all" label="All" count={total} current={filters.source} onPick={setSource} />
-          {sources.map((s) => (
+          <SourceTab id="all" label="All" count={TOTAL} current={filters.source} onPick={setSource} />
+          {SOURCES.map((s) => (
             <SourceTab key={s.id} id={s.id} label={s.short} count={s.count} current={filters.source} onPick={setSource} />
           ))}
         </nav>
@@ -265,10 +261,10 @@ export default function App({ sources, total }: Props) {
             </button>
           </div>
           {showFilters && (
-            <FilterBar facets={facets} filters={filters} isErrors={filters.source === 'errors'} setFilter={setFilter} clear={() => setFilters((f) => ({ ...EMPTY_FILTERS, source: f.source }))} />
+            <FilterBar facets={facets} filters={filters} setFilter={setFilter} clear={() => setFilters((f) => ({ ...EMPTY_FILTERS, source: f.source }))} />
           )}
-          <ResultList
-            client={client.current}
+          {client ? <ResultList
+            client={client}
             refs={refs}
             active={active}
             setActive={setActive}
@@ -284,14 +280,14 @@ export default function App({ sources, total }: Props) {
                 <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
               </div>
             ) : null}
-          />
+          /> : <ResultsSkeleton />}
         </section>
 
         <section class="pane pane-detail" aria-label="Details">
-          {openRow ? (
-            <Detail row={openRow} sources={sources} client={client.current} onOpen={open} onClose={close} />
+          {openRow && client ? (
+            <Detail row={openRow} client={client} onOpen={open} onClose={close} />
           ) : (
-            <Intro sources={sources} total={total} onPick={(s, qq) => { setSource(s); setQ(qq); inputRef.current?.focus(); }} />
+            <Intro onPick={(s, qq) => { setSource(s); setQ(qq); inputRef.current?.focus(); }} />
           )}
         </section>
       </main>
@@ -300,7 +296,7 @@ export default function App({ sources, total }: Props) {
 }
 
 /** Source hue for the canvas; darkened in light theme so glyphs read on the pale ground. */
-function fieldColor(s: string) {
+function fieldColor(s: Filters['source']) {
   const hex = sourceColor(s);
   if (toneDim() > 0.8) {
     const n = parseInt(hex.slice(1), 16);
@@ -317,10 +313,10 @@ function toneDim() {
   return light ? 0.85 : 0.78;
 }
 
-function SourceTab({ id, label, count, current, onPick }: { id: SourceId | 'all'; label: string; count: number; current: string; onPick: (s: any) => void }) {
+function SourceTab({ id, label, count, current, onPick }: { id: Filters['source']; label: string; count: number; current: string; onPick: (s: Filters['source']) => void }) {
   const on = id === current;
   return (
-    <button type="button" class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={{ '--src': sourceColor(id) } as any} onClick={() => onPick(id)}>
+    <button type="button" class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
       <span class="source-dot" aria-hidden="true" />
       {label}
       <span class="source-n">{fmt.format(count)}</span>
@@ -328,24 +324,26 @@ function SourceTab({ id, label, count, current, onPick }: { id: SourceId | 'all'
   );
 }
 
-function FilterBar({ facets, filters, isErrors, setFilter, clear }: { facets: Facets; filters: Filters; isErrors: boolean; setFilter: <K extends keyof Filters>(k: K, v: Filters[K]) => void; clear: () => void }) {
+function FilterBar({ facets, filters, setFilter, clear }: { facets: Facets; filters: Filters; setFilter: <K extends keyof Filters>(k: K, v: Filters[K]) => void; clear: () => void }) {
+  const kind = kindOf(filters.source);
+  const extraLabel = sourceMeta(filters.source)?.extraLabel;
   return (
     <div class="filters" id="filters">
-      {!isErrors && facets.verbs.length > 0 && (
+      {kind.hasVerbs && facets.verbs.length > 0 && (
         <Select label="Verb" value={filters.verb} options={facets.verbs} onChange={(v) => setFilter('verb', v)} />
       )}
       {facets.modules.length > 1 && (
-        <Select label={isErrors ? 'Product' : 'Module'} value={filters.module} options={facets.modules} onChange={(v) => setFilter('module', v)} />
+        <Select label={kind.moduleLabel} value={filters.module} options={facets.modules} onChange={(v) => setFilter('module', v)} />
       )}
       {facets.categories.length > 1 && (
         <Select label="Category" value={filters.category} options={facets.categories} onChange={(v) => setFilter('category', v)} />
       )}
-      {facets.extras.length > 1 && (
-        <Select label={filters.source === 'mecm' ? 'Site role' : 'API'} value={filters.extra} options={facets.extras} onChange={(v) => setFilter('extra', v)} />
+      {extraLabel && facets.extras.length > 1 && (
+        <Select label={extraLabel} value={filters.extra} options={facets.extras} onChange={(v) => setFilter('extra', v)} />
       )}
       <label class="check">
         <input type="checkbox" checked={filters.examples} onChange={(e) => setFilter('examples', (e.target as HTMLInputElement).checked)} />
-        {isErrors ? 'Has resolution' : 'Has examples'}
+        {kind.flagLabel}
       </label>
       <button type="button" class="link-btn" onClick={clear}>Reset</button>
     </div>
@@ -375,36 +373,27 @@ function EmptyState({ q, filters, sourceLabel, reset }: { q: string; filters: Fi
   );
 }
 
-const SAMPLES: { s: SourceId; q: string; label: string }[] = [
-  { s: 'graph', q: 'Get-MgUser', label: 'Get-MgUser' },
-  { s: 'az', q: 'Get-AzVM', label: 'Get-AzVM' },
-  { s: 'entra', q: 'Get-EntraGroupMember', label: 'Get-EntraGroupMember' },
-  { s: 'exchange', q: 'Set-Mailbox', label: 'Set-Mailbox' },
-  { s: 'mecm', q: 'Invoke-CMClientAction', label: 'Invoke-CMClientAction' },
-  { s: 'errors', q: 'AADSTS50076', label: 'AADSTS50076' },
-];
-
-function Intro({ sources, total, onPick }: { sources: SourceMeta[]; total: number; onPick: (s: SourceId, q: string) => void }) {
+function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) {
   return (
     <div class="intro">
       <h2>Type a fragment. Get the command.</h2>
       <p class="intro-lede">
-        {fmt.format(total)} entries from six Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
+        {fmt.format(TOTAL)} entries from six Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
       </p>
       <ul class="intro-samples" aria-label="Example searches">
-        {SAMPLES.map((x) => (
-          <li key={x.q}>
-            <button type="button" style={{ '--src': sourceColor(x.s) } as any} onClick={() => onPick(x.s, x.q)}>
-              <span class="source-dot" aria-hidden="true" /><code>{x.label}</code>
+        {SOURCES.map((s) => (
+          <li key={s.id}>
+            <button type="button" style={srcStyle(s.id)} onClick={() => onPick(s.id, s.sample)}>
+              <span class="source-dot" aria-hidden="true" /><code>{s.sample}</code>
             </button>
           </li>
         ))}
       </ul>
       <dl class="intro-sources">
-        {sources.map((s) => (
-          <div key={s.id} style={{ '--src': sourceColor(s.id) } as any}>
+        {SOURCES.map((s) => (
+          <div key={s.id} style={srcStyle(s.id)}>
             <dt><span class="source-dot" aria-hidden="true" />{s.label}</dt>
-            <dd>{fmt.format(s.count)}{s.version && s.version !== '0.0.0' ? <span> · {s.kind === 'error' ? 'updated ' : 'v'}{s.version}</span> : null}</dd>
+            <dd>{fmt.format(s.count)}{s.version && s.version !== '0.0.0' ? <span> · {KINDS[s.kind].versionPrefix}{s.version}</span> : null}</dd>
           </div>
         ))}
       </dl>

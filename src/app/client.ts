@@ -1,81 +1,66 @@
-import type { Facets, Filters, FromWorker, Row, ToWorker } from './types';
+import type { Filters, FromWorker, RequestType, Requests, Results, ToWorker } from './types';
 
-type Pending = (m: FromWorker) => void;
+interface Handlers {
+  onResults: (r: Results) => void;
+  onDescriptions: () => void;
+  onLoadError: (message: string) => void;
+}
 
-/** Thin promise wrapper around the search worker. Stale search replies are dropped by id. */
+/** Owns the search worker. Search replies older than the latest search are dropped. */
 export class SearchClient {
-  private w: Worker;
+  private worker = new Worker(new URL('./search.worker.ts', import.meta.url), { type: 'module' });
   private seq = 0;
-  private pending = new Map<number, Pending>();
   private latestSearch = 0;
-  ready: Promise<void>;
-  onDesc: () => void = () => {};
-  onLoadError: (message: string) => void = () => {};
-  onResults: (r: { refs: Int32Array; total: number; facets: Facets; ms: number }) => void = () => {};
+  private pending = new Map<number, (reply: unknown) => void>();
+  private ready: Promise<void>;
 
-  constructor() {
-    this.w = new Worker(new URL('./search.worker.ts', import.meta.url), { type: 'module' });
-    let resolveReady!: () => void;
-    this.ready = new Promise((r) => (resolveReady = r));
-    this.w.onmessage = (ev: MessageEvent<FromWorker>) => {
-      const m = ev.data;
-      if (m.type === 'ready') return resolveReady();
-      if (m.type === 'desc-ready') return this.onDesc();
-      if (m.type === 'load-error') return this.onLoadError(m.message);
-      if (m.type === 'results') {
-        if (m.id === this.latestSearch) this.onResults(m);
-        return;
+  constructor(h: Handlers) {
+    let markReady!: () => void;
+    this.ready = new Promise((r) => (markReady = r));
+    this.worker.onmessage = ({ data: m }: MessageEvent<FromWorker>) => {
+      switch (m.type) {
+        case 'ready': return markReady();
+        case 'desc-ready': return h.onDescriptions();
+        case 'load-error': return h.onLoadError(m.message);
+        case 'results': if (m.id === this.latestSearch) h.onResults(m); return;
+        case 'reply': this.pending.get(m.id)?.(m.reply); this.pending.delete(m.id); return;
       }
-      const p = this.pending.get(m.id);
-      if (p) { this.pending.delete(m.id); p(m); }
     };
   }
 
-  private send(m: ToWorker) { this.w.postMessage(m); }
-
   search(q: string, filters: Filters) {
-    const id = ++this.seq;
-    this.latestSearch = id;
-    this.send({ type: 'search', id, q, filters });
+    this.latestSearch = ++this.seq;
+    this.post({ type: 'search', id: this.latestSearch, q, filters });
   }
 
-  rows(refs: number[]): Promise<Row[]> {
-    const id = ++this.seq;
-    return new Promise((res) => {
-      this.pending.set(id, (m) => res(m.type === 'rows' ? m.rows : []));
-      this.send({ type: 'rows', id, refs });
-    });
-  }
-
-  related(key: string): Promise<Row[]> {
-    const id = ++this.seq;
-    return new Promise((res) => {
-      this.pending.set(id, (m) => res(m.type === 'related' ? m.rows : []));
-      this.send({ type: 'related', id, key });
-    });
-  }
-
-  async find(key: string): Promise<Row | null> {
+  /** Ask the worker a question once its index has loaded. */
+  async request<K extends RequestType>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
     await this.ready;
     const id = ++this.seq;
-    return new Promise((res) => {
-      this.pending.set(id, (m) => res(m.type === 'found' ? m.row : null));
-      this.send({ type: 'find', id, key });
+    return new Promise((resolve) => {
+      this.pending.set(id, resolve as (reply: unknown) => void);
+      this.post({ type, id, args } as ToWorker);
     });
+  }
+
+  private post(m: ToWorker) {
+    this.worker.postMessage(m);
   }
 }
 
-const detailCache = new Map<string, Promise<any>>();
-export function loadDetail(source: string, file: string): Promise<any> {
-  const k = `${source}/${file}`;
-  let p = detailCache.get(k);
+const detailCache = new Map<string, Promise<unknown>>();
+
+/** Fetch (once) a detail file. `F` is the file shape the caller's source kind writes (see types.ts). */
+export function loadDetail<F>(source: string, file: string): Promise<F> {
+  const key = `${source}/${file}`;
+  let p = detailCache.get(key);
   if (!p) {
     p = fetch(`/data/${source}/${encodeURIComponent(file)}.json`).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     });
-    p.catch(() => detailCache.delete(k));
-    detailCache.set(k, p);
+    p.catch(() => detailCache.delete(key));
+    detailCache.set(key, p);
   }
-  return p;
+  return p as Promise<F>;
 }

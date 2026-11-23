@@ -41,19 +41,20 @@ dist/                 static site, deployed by Vercel on every push to main
 npm install
 npm run dev        # builds the index, then starts Astro on http://localhost:4321
 npm run build      # index + static build into dist/
+npm run typecheck  # index + tsc
+npm run test:e2e   # browser checks against the built site (needs Playwright + Chromium)
 ```
 
 ## Refresh data locally
 
-Each pipeline writes to `data/<source>/`. Example:
+Each source has a script that fetches its upstream docs into a temp directory and rewrites `data/<source>/`:
 
 ```bash
-git clone --depth 1 --filter=blob:none --sparse https://github.com/MicrosoftDocs/sccm-docs-powershell-ref.git docs
-(cd docs && git sparse-checkout set sccm-ps/ConfigurationManager)
-python3 pipelines/mecm/parse_docs.py docs
+bash pipelines/mecm/refresh.sh
+python3 scripts/check-shrink.py mecm   # refuses a refresh that lost entries or its version
 ```
 
-`.github/workflows/update-data.yml` shows the exact command for every source. Run it on demand from the Actions tab (input `sources`: `all` or e.g. `graph,errors`). `scripts/check-shrink.py` stops a refresh that lost more than 10% of a source's entries, which is what a failed upstream clone looks like.
+`.github/workflows/update-data.yml` runs the same scripts: daily for cmdlet sources, monthly for error codes, or on demand from the Actions tab (input `sources`: `all` or e.g. `graph,errors`). New sources are a `pipelines/<id>/refresh.sh` plus an entry in `SOURCES` in `scripts/build-index.mjs`.
 
 PowerShell alternatives that read installed modules instead of docs: `pipelines/az/get-azcmdlets.ps1`, `pipelines/mecm/get-mecmcmdlets.ps1`.
 

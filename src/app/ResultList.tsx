@@ -1,14 +1,14 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { SearchClient } from './client';
-import { sourceColor } from './colors';
+import { kindOf, srcStyle } from './sources';
 import type { Row } from './types';
 
 const ROW_H = 64;
 const OVERSCAN = 8;
 
 interface Props {
-  client?: SearchClient;
+  client: SearchClient;
   refs: Int32Array | null;
   active: number;
   setActive: (i: number) => void;
@@ -53,7 +53,7 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, d
 
   // Materialise the visible window.
   useEffect(() => {
-    if (!client || !refs) return;
+    if (!refs) return;
     const want: number[] = [];
     const end = Math.min(refs.length, range.end);
     for (let i = range.start; i < end; i++) if (!cache.current.has(refs[i])) want.push(refs[i]);
@@ -67,7 +67,7 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, d
     };
     if (!want.length) return publish();
     let live = true;
-    client.rows(want).then((got) => {
+    client.request('rows', { refs: want }).then((got) => {
       if (!live) return;
       // Evict before inserting, so the rows about to be shown are never the ones dropped.
       if (cache.current.size + got.length > 4000) cache.current.clear();
@@ -90,28 +90,30 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, d
   if (refs && refs.length === 0) return <div class="results results-empty">{empty}</div>;
 
   const items = [];
-  if (refs) {
-    const end = Math.min(refs.length, range.end);
-    for (let i = range.start; i < end; i++) {
-      const r = rows.get(refs[i]);
-      items.push(
-        r ? (
-          <ResultRow key={refs[i]} i={i} row={r} query={query} active={i === active} open={r.key === openKey} onOpen={onOpen} onHover={setActive} />
-        ) : (
-          <div key={refs[i]} class="result result-skel" style={{ top: `${i * ROW_H}px` }} aria-hidden="true"><span /><span /></div>
-        ),
-      );
-    }
+  for (let i = range.start; refs && i < Math.min(refs.length, range.end); i++) {
+    const r = rows.get(refs[i]);
+    items.push(r
+      ? <ResultRow key={refs[i]} i={i} row={r} query={query} active={i === active} open={r.key === openKey} onOpen={onOpen} onHover={setActive} />
+      : <SkeletonRow key={refs[i]} i={i} />);
   }
 
   return (
     <div class="results" ref={scroller} onScroll={measure} id="results" role="listbox" aria-label="Search results" aria-busy={!refs}>
-      <div class="results-inner" style={{ height: `${(refs ? refs.length : 12) * ROW_H}px` }}>
-        {refs ? items : Array.from({ length: 12 }, (_, i) => <div key={i} class="result result-skel" style={{ top: `${i * ROW_H}px` }} aria-hidden="true"><span /><span /></div>)}
-      </div>
+      {refs ? <div class="results-inner" style={{ height: `${refs.length * ROW_H}px` }}>{items}</div> : <SkeletonRows />}
     </div>
   );
 }
+
+const SkeletonRow = ({ i }: { i: number }) => (
+  <div class="result result-skel" style={{ top: `${i * ROW_H}px` }} aria-hidden="true"><span /><span /></div>
+);
+
+const SkeletonRows = () => (
+  <div class="results-inner" style={{ height: `${12 * ROW_H}px` }}>{Array.from({ length: 12 }, (_, i) => <SkeletonRow key={i} i={i} />)}</div>
+);
+
+/** Placeholder list before the search client exists (also the server-rendered state). */
+export const ResultsSkeleton = () => <div class="results" aria-busy="true" aria-label="Search results"><SkeletonRows /></div>;
 
 function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number; row: Row; query: string; active: boolean; open: boolean; onOpen: (r: Row) => void; onHover: (i: number) => void }) {
   return (
@@ -119,14 +121,14 @@ function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number
       role="option"
       aria-selected={open}
       class={'result' + (active ? ' is-active' : '') + (open ? ' is-open' : '')}
-      style={{ top: `${i * ROW_H}px`, '--src': sourceColor(row.source) } as any}
+      style={{ top: `${i * ROW_H}px`, ...srcStyle(row.source) }}
       onClick={() => onOpen(row)}
       onMouseMove={() => !active && onHover(i)}
     >
       <div class="result-line">
         <span class="source-dot" aria-hidden="true" />
         <code class="result-name"><Mark text={row.name} q={query} /></code>
-        <span class="result-meta">{row.source === 'errors' || row.dup ? row.module : row.extra === 'beta' ? 'beta' : ''}</span>
+        <span class="result-meta">{kindOf(row.source).rowTag(row)}</span>
       </div>
       <p class="result-desc">{row.desc || <span class="result-module">{row.module || row.category}</span>}</p>
     </div>

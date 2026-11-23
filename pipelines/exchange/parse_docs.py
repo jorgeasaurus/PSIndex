@@ -19,6 +19,9 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common import keep_previous_versions  # noqa: E402
+
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
     ('exchange/exchange-ps/ExchangePowerShell', 'Exchange'),
@@ -79,25 +82,6 @@ def fetch_gallery_version(package_name):
     except (urllib.error.URLError, OSError) as e:
         print(f"  Warning: Could not fetch version for {package_name}: {e}")
         return ''
-
-
-def previous_versions(data_dir):
-    """Versions recorded by the last successful run, used when the Gallery lookup fails."""
-    prev = {}
-    mod_dir = Path(data_dir) / "modules"
-    if mod_dir.is_dir():
-        for f in mod_dir.glob("*.json"):
-            try:
-                ver = json.loads(f.read_text(encoding="utf-8")).get("version")
-            except (OSError, ValueError):
-                continue
-            if ver:
-                prev[f.stem] = ver
-    try:
-        prev["__manifest__"] = json.loads((Path(data_dir) / "manifest.json").read_text(encoding="utf-8")).get("v")
-    except (OSError, ValueError):
-        pass
-    return prev
 
 
 def fetch_module_versions():
@@ -218,12 +202,8 @@ def main():
 
     print("Fetching module versions from PowerShell Gallery...")
     module_versions = fetch_module_versions()
-    prev = previous_versions(out_dir)
-    for mod, ver in prev.items():
-        if mod != '__manifest__' and not module_versions.get(mod):
-            module_versions[mod] = ver
-            print(f"  {mod}: Gallery lookup failed; kept previous version {ver}")
-    primary_version = module_versions.get('ExchangePowerShell') or prev.get('__manifest__') or '0.0.0'
+    keep_previous_versions(module_versions, MODULE_PACKAGE_MAP, out_dir)
+    primary_version = module_versions.get('ExchangePowerShell') or '0.0.0'
 
     manifest_entries = []
     descriptions = {}

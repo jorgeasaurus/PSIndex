@@ -1,54 +1,46 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { ArrowLeft, Check, Copy, ExternalLink, Link2 } from 'lucide-preact';
+import { ArrowLeft, ExternalLink, Link2 } from 'lucide-preact';
 import { loadDetail, type SearchClient } from './client';
-import { sourceColor } from './colors';
+import { CopyIconButton, CopyTextButton } from './copy';
 import { isCommonParam, parseParams, tokenize, type Param } from './powershell';
-import type { Row, SourceMeta } from './types';
+import { KINDS, sourceMeta, srcStyle } from './sources';
+import type { CmdletDetail, CmdletFile, ErrorDetail, ErrorFile, Row, SourceKind, SourceMeta } from './types';
 
 interface Props {
   row: Row;
-  sources: SourceMeta[];
-  client?: SearchClient;
+  client: SearchClient;
   onOpen: (r: Row) => void;
   onClose: () => void;
 }
 
-type State = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; data: any };
-
-export function Detail({ row, sources, client, onOpen, onClose }: Props) {
-  const [state, setState] = useState<State>({ status: 'loading' });
+export function Detail({ row, client, onOpen, onClose }: Props) {
   const [related, setRelated] = useState<Row[]>([]);
-  const top = useRef<HTMLDivElement>(null);
-  const src = sources.find((s) => s.id === row.source)!;
+  const top = useRef<HTMLElement>(null);
+  const src = sourceMeta(row.source)!; // rows only come from the worker, which only knows SOURCES
+  const Body = BODIES[src.kind];
 
   useEffect(() => {
     let live = true;
-    setState({ status: 'loading' });
     top.current?.scrollTo?.({ top: 0 });
-    loadDetail(row.source, row.file)
-      .then((d) => {
-        if (!live) return;
-        const entry = row.source === 'errors' ? d.errors?.[row.name] : d.cmdlets?.[row.name];
-        setState(entry ? { status: 'ok', data: entry } : { status: 'error', message: 'This entry is in the index but its detail file has no record for it.' });
-      })
-      .catch((e) => live && setState({ status: 'error', message: `Couldn’t load details (${e.message}). Check your connection and pick the entry again.` }));
-    client?.related(row.key).then((r) => live && setRelated(r));
+    setRelated([]);
+    client.request('related', { key: row.key }).then((r) => live && setRelated(r));
     return () => { live = false; };
   }, [row.key]);
 
   const learn = learnUrl(row, src);
 
   return (
-    <article class="detail" ref={top} style={{ '--src': sourceColor(row.source) } as any} aria-labelledby="detail-title">
+    <article class="detail" ref={top} style={srcStyle(row.source)} aria-labelledby="detail-title">
       <div class="detail-head">
         <button type="button" class="icon-btn detail-back" onClick={onClose} aria-label="Back to results"><ArrowLeft size={18} /></button>
         <h2 id="detail-title" class="detail-title">
           <code>{row.name}</code>
-          <CopyBtn text={row.name} label="Copy name" />
+          <CopyIconButton text={row.name} label="Copy name" />
         </h2>
         <div class="tags">
           <span class="tag tag-source"><span class="source-dot" aria-hidden="true" />{src.short}</span>
-          {row.source === 'errors' ? <span class="tag">{row.module}</span> : row.module && <span class="tag">{row.module}</span>}
+          {row.module && <span class="tag">{row.module}</span>}
           {row.verb && <span class="tag">{row.verb}</span>}
           {row.category && row.category !== row.module && !row.module.endsWith('.' + row.category) && <span class="tag">{row.category}</span>}
           {row.extra && <span class={'tag' + (row.extra === 'beta' ? ' tag-warn' : '')}>{row.extra}</span>}
@@ -56,22 +48,20 @@ export function Detail({ row, sources, client, onOpen, onClose }: Props) {
         </div>
         <div class="detail-links">
           {learn && <a class="btn" href={learn} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} /></a>}
-          <CopyBtn text={shareUrl(row)} label="Copy link" icon={<Link2 size={14} />} text-label="Copy link" />
+          <CopyTextButton text={shareUrl(row)} label="Copy link" icon={<Link2 size={14} />} />
         </div>
       </div>
 
-      {state.status === 'loading' && <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>}
-      {state.status === 'error' && <p class="notice notice-error" role="alert">{state.message}</p>}
-      {state.status === 'ok' && (row.source === 'errors' ? <ErrorBody e={state.data} row={row} /> : <CmdletBody c={state.data} row={row} />)}
+      <Body row={row} />
 
       {related.length > 0 && (
         <section class="block">
-          <h3>{row.source === 'errors' ? 'Nearby codes' : `Same noun · ${row.name.slice(row.name.indexOf('-') + 1)}`}</h3>
+          <h3>{KINDS[src.kind].relatedTitle(row.name)}</h3>
           <ul class="related">
             {related.map((r) => (
               <li key={r.key}>
                 <button type="button" onClick={() => onOpen(r)}>
-                  <code>{r.name}</code>{r.dup && r.source !== 'errors' ? <span class="related-mod"> · {r.module}</span> : null}
+                  <code>{r.name}</code>{r.dup ? <span class="related-mod"> · {r.module}</span> : null}
                 </button>
               </li>
             ))}
@@ -82,37 +72,68 @@ export function Detail({ row, sources, client, onOpen, onClose }: Props) {
   );
 }
 
-function CmdletBody({ c, row }: { c: any; row: Row }) {
-  const syntax: string = c.syntax ?? '';
-  const sets = useMemo(() => syntax.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean), [syntax]);
-  const params: Param[] = useMemo(() => {
-    const parsed = parseParams(syntax);
-    if (Array.isArray(c.parameters) && c.parameters.length) {
-      const byName = new Map(parsed.map((p) => [p.name, p]));
-      return c.parameters.map((p: any) => ({
-        name: p.name,
-        type: p.type || byName.get(p.name)?.type || '',
-        required: !!p.required,
-        positional: byName.get(p.name)?.positional ?? false,
-        description: p.description,
-      }));
-    }
-    return parsed;
-  }, [syntax]);
+type EntryState<E> = { status: 'loading' } | { status: 'missing' } | { status: 'failed'; message: string } | { status: 'ok'; entry: E };
+
+/** Loads the detail file for `row`, picks the row's entry out of it, and renders loading / error states. */
+function Entry<F, E>({ row, pick, render }: { row: Row; pick: (file: F) => E | undefined; render: (entry: E) => ComponentChildren }) {
+  const [state, setState] = useState<EntryState<E>>({ status: 'loading' });
+  useEffect(() => {
+    let live = true;
+    setState({ status: 'loading' });
+    loadDetail<F>(row.source, row.file)
+      .then((file) => {
+        const entry = pick(file);
+        if (live) setState(entry ? { status: 'ok', entry } : { status: 'missing' });
+      })
+      .catch((e) => live && setState({ status: 'failed', message: e.message }));
+    return () => { live = false; };
+  }, [row.key]);
+
+  switch (state.status) {
+    case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
+    case 'missing': return <p class="notice notice-error" role="alert">This entry is in the index but its detail file has no record for it.</p>;
+    case 'failed': return <p class="notice notice-error" role="alert">Couldn’t load details ({state.message}). Check your connection and pick the entry again.</p>;
+    case 'ok': return <>{render(state.entry)}</>;
+  }
+}
+
+const BODIES: Record<SourceKind, (p: { row: Row }) => ComponentChildren> = {
+  cmdlet: ({ row }) => <Entry<CmdletFile, CmdletDetail> row={row} pick={(f) => f.cmdlets[row.name]} render={(c) => <CmdletBody c={c} row={row} />} />,
+  error: ({ row }) => <Entry<ErrorFile, ErrorDetail> row={row} pick={(f) => f.errors[row.name]} render={(e) => <ErrorBody e={e} name={row.name} />} />,
+};
+
+/** Pipelines that document parameters (MECM) win; otherwise parameters are parsed from the syntax. */
+function paramsOf(c: CmdletDetail): Param[] {
+  const parsed = parseParams(c.syntax ?? '');
+  if (!c.parameters?.length) return parsed;
+  const byName = new Map(parsed.map((p) => [p.name, p]));
+  return c.parameters.map((p) => ({
+    name: p.name,
+    type: p.type || byName.get(p.name)?.type || '',
+    required: p.required,
+    positional: byName.get(p.name)?.positional ?? false,
+    description: p.description,
+  }));
+}
+
+function CmdletBody({ c, row }: { c: CmdletDetail; row: Row }) {
+  const sets = useMemo(() => (c.syntax ?? '').split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean), [c]);
+  const params = useMemo(() => paramsOf(c), [c]);
   const [showCommon, setShowCommon] = useState(false);
   const visible = showCommon ? params : params.filter((p) => !isCommonParam(p.name));
   const hidden = params.length - visible.length;
-  const examples: string[] = (c.examples ?? []).filter((x: string) => x && x.trim());
-  const perms: string[] = c.permissions ?? [];
+  const examples = (c.examples ?? []).filter((x) => x.trim());
+  const perms = c.permissions ?? [];
+  const description = c.description || row.desc;
 
   return (
     <>
-      {(c.description || row.desc) && <p class="detail-desc">{c.description || row.desc}</p>}
+      {description && <p class="detail-desc">{description}</p>}
 
       {sets.length > 0 && (
         <section class="block">
           <h3>Syntax{sets.length > 1 ? <span class="h-note"> · {sets.length} parameter sets</span> : null}</h3>
-          {sets.map((s, i) => <Code key={i} src={s} view={reflowSyntax(s)} syntax />)}
+          {sets.map((s, i) => <SyntaxBlock key={i} src={s} />)}
         </section>
       )}
 
@@ -137,20 +158,20 @@ function CmdletBody({ c, row }: { c: any; row: Row }) {
 
       {perms.length > 0 && (
         <section class="block">
-          <h3>Permissions <CopyBtn text={perms.join(', ')} label="Copy all permissions" small /></h3>
+          <h3>Permissions <CopyIconButton text={perms.join(', ')} label="Copy all permissions" small /></h3>
           <ul class="perms">{perms.map((p) => <li key={p}><code>{p}</code></li>)}</ul>
         </section>
       )}
 
       <section class="block">
         <h3>Examples</h3>
-        {examples.length ? examples.map((x, i) => <Code key={i} src={x} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
+        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
       </section>
     </>
   );
 }
 
-function ErrorBody({ e, row }: { e: any; row: Row }) {
+function ErrorBody({ e, name }: { e: ErrorDetail; name: string }) {
   return (
     <>
       {e.message && <p class="detail-desc detail-message">{e.message}</p>}
@@ -159,7 +180,7 @@ function ErrorBody({ e, row }: { e: any; row: Row }) {
       )}
       <section class="block">
         <h3>Resolution</h3>
-        {e.resolution ? <p class="prose">{e.resolution}</p> : <p class="h-sub">Microsoft’s docs list no resolution for this code. Search Microsoft Learn for <code>{row.name}</code>.</p>}
+        {e.resolution ? <p class="prose">{e.resolution}</p> : <p class="h-sub">Microsoft’s docs list no resolution for this code. Search Microsoft Learn for <code>{name}</code>.</p>}
       </section>
       {e.source_file && (
         <section class="block"><h3>Source</h3><p class="h-sub"><code>{e.source_file}</code></p></section>
@@ -168,62 +189,46 @@ function ErrorBody({ e, row }: { e: any; row: Row }) {
   );
 }
 
-/** One line per set, with no-break spaces inside each [...] group so a parameter wraps as a unit. */
-function reflowSyntax(s: string): string {
-  const flat = s.replace(/\s+/g, ' ').trim();
-  let depth = 0, out = '';
-  for (const ch of flat) {
+const renderTokens = (s: string) => tokenize(s).map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>));
+
+/**
+ * A syntax set as one wrapping line where each top-level group ("Cmd", "[-Name <Type>]") is a
+ * non-wrapping unit, so lines only break between parameters.
+ */
+function syntaxGroups(s: string): string[] {
+  const groups: string[] = [];
+  let depth = 0, cur = '';
+  for (const ch of s.replace(/\s+/g, ' ').trim()) {
+    if (ch === ' ' && depth === 0) { groups.push(cur); cur = ''; continue; }
     if (ch === '[') depth++;
     if (ch === ']') depth = Math.max(0, depth - 1);
-    out += ch === ' ' && depth > 0 ? '\u00a0' : ch;
+    cur += ch;
   }
-  return out;
+  return cur ? [...groups, cur] : groups;
 }
 
-const renderToks = (s: string) => tokenize(s).map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>));
+function SyntaxBlock({ src }: { src: string }) {
+  const body = useMemo(() => syntaxGroups(src).flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderTokens(g)}</span>]), [src]);
+  return <CodeFrame copy={src} syntax>{body}</CodeFrame>;
+}
 
-function Code({ src, view, syntax }: { src: string; view?: string; syntax?: boolean }) {
-  const body = useMemo(() => {
-    if (!syntax) return renderToks(src);
-    // Each depth-0 group ("[-Name <Type>]") is a non-wrapping unit; breaks only fall between groups.
-    const groups = (view ?? src).split(' ');
-    return groups.flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderToks(g.replace(/\u00a0/g, ' '))}</span>]);
-  }, [src, view, syntax]);
+function CodeBlock({ src }: { src: string }) {
+  const body = useMemo(() => renderTokens(src), [src]);
+  return <CodeFrame copy={src}>{body}</CodeFrame>;
+}
+
+function CodeFrame({ copy, syntax, children }: { copy: string; syntax?: boolean; children: ComponentChildren }) {
   return (
     <div class={'code' + (syntax ? ' code-syntax' : '')}>
-      <pre><code>{body}</code></pre>
-      <CopyBtn text={src} label="Copy code" small />
+      <pre><code>{children}</code></pre>
+      <CopyIconButton text={copy} label="Copy code" small />
     </div>
   );
 }
 
-function CopyBtn({ text, label, small, icon, ...rest }: { text: string; label: string; small?: boolean; icon?: any; 'text-label'?: string }) {
-  const [done, setDone] = useState(false);
-  const textLabel = rest['text-label'];
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1400);
-    } catch {
-      /* clipboard blocked: leave state unchanged */
-    }
-  };
-  if (textLabel) {
-    return <button type="button" class="btn btn-quiet" onClick={copy}>{done ? <Check size={14} /> : icon} {done ? 'Copied' : textLabel}</button>;
-  }
-  return (
-    <button type="button" class={'icon-btn copy' + (small ? ' copy-sm' : '') + (done ? ' is-done' : '')} onClick={copy} aria-label={done ? 'Copied' : label} title={label}>
-      {done ? <Check size={small ? 14 : 16} /> : <Copy size={small ? 14 : 16} />}
-    </button>
-  );
-}
-
 function learnUrl(row: Row, src: SourceMeta): string {
-  if (src.kind === 'error') return '';
-  if (src.learn === 'configurationmanager') return `https://learn.microsoft.com/powershell/module/configurationmanager/${row.name.toLowerCase()}`;
-  if (!row.module) return '';
-  return `https://learn.microsoft.com/powershell/module/${row.module.toLowerCase()}/${row.name.toLowerCase()}`;
+  if (!src.learn || (src.learn.includes('{module}') && !row.module)) return '';
+  return src.learn.replace('{module}', row.module.toLowerCase()).replace('{name}', row.name.toLowerCase());
 }
 
 function shareUrl(row: Row) {

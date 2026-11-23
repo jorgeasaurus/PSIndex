@@ -9,3 +9,4 @@ public/idx/
 __pycache__/
 docs_work/
 .DS_Store
+src/sources.generated.json

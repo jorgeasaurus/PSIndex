@@ -22,6 +22,9 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common import keep_previous_versions  # noqa: E402
+
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
     ("DeviceManagement", "Device Management"),
@@ -224,25 +227,6 @@ PSGALLERY_URL = (
 )
 
 
-def previous_versions(data_dir):
-    """Versions recorded by the last successful run, used when the Gallery lookup fails."""
-    prev = {}
-    mod_dir = Path(data_dir) / "modules"
-    if mod_dir.is_dir():
-        for f in mod_dir.glob("*.json"):
-            try:
-                ver = json.loads(f.read_text(encoding="utf-8")).get("version")
-            except (OSError, ValueError):
-                continue
-            if ver:
-                prev[f.stem] = ver
-    try:
-        prev["__manifest__"] = json.loads((Path(data_dir) / "manifest.json").read_text(encoding="utf-8")).get("v")
-    except (OSError, ValueError):
-        pass
-    return prev
-
-
 def fetch_module_version(module_id: str) -> tuple:
     """Fetch the latest version of a module from the PowerShell Gallery."""
     url = PSGALLERY_URL.format(module_id)
@@ -332,12 +316,7 @@ def main():
     # Fetch module versions from PowerShell Gallery
     unique_modules = sorted(set(c["module"] for c in all_cmdlets))
     module_versions = fetch_all_module_versions(unique_modules)
-    prev = previous_versions(data_dir)
-    kept = [m for m in unique_modules if not module_versions.get(m) and prev.get(m)]
-    for m in kept:
-        module_versions[m] = prev[m]
-    if kept:
-        print(f"  Gallery lookup failed for {len(kept)} modules; kept their previous versions")
+    keep_previous_versions(module_versions, unique_modules, data_dir)
 
     # Build slim manifest (short keys, no descriptions or moduleVersion)
     DEFAULT_DESC = "Microsoft Graph PowerShell cmdlet."

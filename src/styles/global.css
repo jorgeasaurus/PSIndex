@@ -19,12 +19,7 @@
   --faint: #7f89a3;
   --code-bg: #0a0e16;
 
-  --src-graph: #9b8cff;
-  --src-az: #4cb3ff;
-  --src-entra: #2fd0b5;
-  --src-exchange: #f2b33d;
-  --src-mecm: #7fd45a;
-  --src-errors: #ff7a6b;
+  /* Source hues come from scripts/build-index.mjs and are set inline as --src. */
   --src-all: #b9c3d6;
 
   --tok-cmd: #c7b8ff;
@@ -131,12 +126,6 @@ a { color: inherit; text-underline-offset: 3px; }
   max-width: 1560px;
   margin: 0 auto;
 }
-.app[data-source='graph'] { --src: var(--src-graph); }
-.app[data-source='az'] { --src: var(--src-az); }
-.app[data-source='entra'] { --src: var(--src-entra); }
-.app[data-source='exchange'] { --src: var(--src-exchange); }
-.app[data-source='mecm'] { --src: var(--src-mecm); }
-.app[data-source='errors'] { --src: var(--src-errors); }
 
 .field {
   position: fixed;

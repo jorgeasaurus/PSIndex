@@ -26,14 +26,19 @@ jobs:
     outputs:
       sources: ${{ steps.pick.outputs.sources }}
     steps:
+      - uses: actions/checkout@v4
       - id: pick
         shell: bash
         run: |
+          # Every pipelines/<source>/refresh.sh is a source. Errors scrape slowly and change rarely:
+          # they run on the 3rd of each month and on any manual run of 'all'.
+          monthly="errors"
           want="${{ github.event.inputs.sources }}"
           if [ -z "$want" ] || [ "$want" = "all" ]; then
-            want="graph,az,entra,exchange,mecm"
-            # Errors scrape is slow and changes rarely: monthly on schedule, always on manual 'all'.
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(date -u +%d)" = "03" ]; then want="$want,errors"; fi
+            want=$(ls pipelines/*/refresh.sh | cut -d/ -f2 | paste -sd, -)
+            if [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "$(date -u +%d)" != "03" ]; then
+              want=$(tr , '\n' <<<"$want" | grep -vx "$monthly" | paste -sd, -)
+            fi
           fi
           echo "sources=$(jq -cn --arg s "$want" '$s | split(",") | map(gsub("\\s";"")) | map(select(length>0))')" >> "$GITHUB_OUTPUT"
 
@@ -53,33 +58,7 @@ jobs:
           python-version: "3.12"
 
       - name: Fetch upstream docs and parse
-        shell: bash
-        run: |
-          set -euo pipefail
-          sparse() { git clone --depth 1 --filter=blob:none --sparse "$1" "$2"; (cd "$2" && shift 2 && git sparse-checkout set "$@"); }
-          case "${{ matrix.source }}" in
-            graph)
-              sparse https://github.com/MicrosoftDocs/microsoftgraph-docs-powershell.git docs \
-                microsoftgraph/graph-powershell-1.0 microsoftgraph/graph-powershell-beta
-              python3 pipelines/graph/parse_docs.py docs/microsoftgraph ;;
-            az)
-              git clone --depth 1 --filter=blob:none --sparse https://github.com/MicrosoftDocs/azure-docs-powershell.git docs
-              (cd docs && git sparse-checkout set --no-cone 'azps-*/Az.*')
-              python3 pipelines/az/parse_docs.py docs ;;
-            entra)
-              sparse https://github.com/MicrosoftDocs/entra-powershell-docs.git docs docs/reference/v1.0 docs/reference/beta
-              python3 pipelines/entra/parse_docs.py docs/docs/reference ;;
-            exchange)
-              git clone --depth 1 https://github.com/MicrosoftDocs/office-docs-powershell.git docs
-              python3 pipelines/exchange/parse_docs.py docs ;;
-            mecm)
-              sparse https://github.com/MicrosoftDocs/sccm-docs-powershell-ref.git docs sccm-ps/ConfigurationManager
-              python3 pipelines/mecm/parse_docs.py docs ;;
-            errors)
-              python3 pipelines/errors/scrape_errors.py ;;
-            *) echo "unknown source ${{ matrix.source }}"; exit 1 ;;
-          esac
-          rm -rf docs
+        run: bash pipelines/${{ matrix.source }}/refresh.sh
 
       - name: Refuse partial refreshes
         run: python3 scripts/check-shrink.py ${{ matrix.source }}

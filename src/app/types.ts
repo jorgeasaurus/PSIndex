@@ -1,11 +1,16 @@
-export type SourceId = 'graph' | 'az' | 'entra' | 'exchange' | 'mecm' | 'errors';
+/** Source ids come from scripts/build-index.mjs (SOURCES); they are data, not a hand-kept union. */
+export type SourceId = string;
+export type SourceKind = 'cmdlet' | 'error';
 
 export interface SourceMeta {
   id: SourceId;
   label: string;
   short: string;
-  kind: 'cmdlet' | 'error';
-  learn?: 'module' | 'configurationmanager';
+  kind: SourceKind;
+  color: string;
+  extraLabel: string; // name of the shard's `x` facet for this source ('' = no such facet)
+  learn: string; // Microsoft Learn URL template with {module} / {name}, or '' for none
+  sample: string; // example search shown on the intro panel
   count: number;
   version: string;
 }
@@ -27,6 +32,24 @@ export interface IndexShard {
   extras: string[];
 }
 
+/** Detail files under public/data/<source>/, as written by the pipelines. */
+export interface CmdletDetail {
+  syntax?: string;
+  examples?: string[];
+  permissions?: string[];
+  parameters?: { name: string; type: string; required: boolean; description?: string }[];
+  description?: string;
+}
+export interface ErrorDetail {
+  message: string;
+  description: string;
+  resolution: string;
+  category: string;
+  source_file: string;
+}
+export interface CmdletFile { module: string; cmdlets: Record<string, CmdletDetail> }
+export interface ErrorFile { product: string; errors: Record<string, ErrorDetail> }
+
 export interface Filters {
   source: SourceId | 'all';
   verb: string;
@@ -37,7 +60,7 @@ export interface Filters {
 }
 
 export interface Row {
-  key: string; // `${source}:${name}`
+  key: string; // `${source}:${name}`, or `${source}:${name}@${module}` when the name repeats in its source
   source: SourceId;
   name: string;
   verb: string;
@@ -58,18 +81,23 @@ export interface Facets {
   extras: string[];
 }
 
-// Worker protocol
+export interface Results { refs: Int32Array; facets: Facets; ms: number }
+
+/** Request/reply pairs answered by the worker. */
+export interface Requests {
+  rows: { args: { refs: number[] }; reply: Row[] };
+  related: { args: { key: string }; reply: Row[] };
+  find: { args: { key: string }; reply: Row | null };
+}
+export type RequestType = keyof Requests;
+
 export type ToWorker =
   | { type: 'search'; id: number; q: string; filters: Filters }
-  | { type: 'rows'; id: number; refs: number[] }
-  | { type: 'related'; id: number; key: string }
-  | { type: 'find'; id: number; key: string };
+  | { [K in RequestType]: { type: K; id: number; args: Requests[K]['args'] } }[RequestType];
 
 export type FromWorker =
-  | { type: 'ready'; sources: SourceId[] }
+  | { type: 'ready' }
   | { type: 'load-error'; message: string }
   | { type: 'desc-ready' }
-  | { type: 'results'; id: number; refs: Int32Array; total: number; facets: Facets; ms: number }
-  | { type: 'rows'; id: number; rows: Row[] }
-  | { type: 'related'; id: number; rows: Row[] }
-  | { type: 'found'; id: number; row: Row | null };
+  | ({ type: 'results'; id: number } & Results)
+  | { type: 'reply'; id: number; reply: Requests[RequestType]['reply'] };
