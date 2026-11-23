@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.astro/
+.vercel/
+public/data/
+public/idx/
+.impeccable/review/
+.impeccable/mocks/
+__pycache__/
+docs_work/
+.DS_Store
