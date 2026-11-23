@@ -10,7 +10,7 @@ const OVERSCAN = 8;
 /** Keyboard navigation, driven from the search box. */
 export interface ListNav {
   move: (delta: number) => void;
-  openActive: () => void;
+  current: () => { ref: number; row: Row | undefined } | null;
 }
 
 interface Props {
@@ -36,10 +36,6 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
   const active = cursor.id === searchId ? cursor.i : 0;
   const setActive = (i: number) => setCursor({ id: searchId, i });
 
-  // Any change of the open entry or the search supersedes a pending Enter.
-  const openToken = useRef(0);
-  useEffect(() => { openToken.current++; }, [openKey, searchId]);
-
   useImperativeHandle(navRef, () => ({
     move: (delta) => {
       if (!refs?.length) return;
@@ -52,17 +48,9 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
       if (top < el.scrollTop) el.scrollTop = top;
       else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
     },
-    openActive: () => {
-      if (!refs?.length) return;
-      const ref = refs[active];
-      const row = rows.get(ref);
-      if (row) return onOpen(row);
-      // Not materialised yet (Enter right after typing, or past the window): fetch it, unless the
-      // selection or the search changes before the reply lands.
-      const token = ++openToken.current;
-      client.request('rows', { refs: [ref] }).then(([r]) => token === openToken.current && onOpen(r));
-    },
-  }), [refs, rows, active, searchId, onOpen]);
+    /** The row under the cursor: its ref, and the row itself once materialised. */
+    current: () => (refs?.length ? { ref: refs[active], row: rows.get(refs[active]) } : null),
+  }), [refs, rows, active, searchId]);
 
   // A new search starts at the top; a refresh of the same search (descriptions arriving) keeps the user's place.
   useLayoutEffect(() => {

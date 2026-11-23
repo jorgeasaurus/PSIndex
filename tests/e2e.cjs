@@ -226,6 +226,25 @@ async function run(browser) {
   check(searched && !werr.length, 'mismatched description shard is ignored', werr.join('; '));
   await ctx.close();
 
+  // An Enter waiting for results is dropped when the user changes the search before they arrive.
+  ctx = await browser.newContext();
+  {
+    let release;
+    const gate = new Promise((r) => (release = r));
+    await ctx.route('**/idx/graph.json*', async (r) => { await gate; r.continue(); });
+    p = await ctx.newPage();
+    await p.goto(BASE);
+    await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+    await p.fill('input[type=search]', 'get-mguser');
+    await p.keyboard.press('Enter');
+    await p.keyboard.press('Escape'); // clears the query: a new search supersedes the pending Enter
+    release();
+  }
+  await rowsReady(p);
+  await p.waitForTimeout(300);
+  check(!(await p.locator('.detail-title').count()) && !param(p, 'c'), 'superseded Enter opens nothing');
+  await ctx.close();
+
   // Closing a deep-linked entry before the index loads keeps it closed.
   ctx = await browser.newContext();
   {

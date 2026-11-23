@@ -60,7 +60,9 @@ function Search() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const listRef = useRef<ListNav>(null);
-  const enterPending = useRef(false);
+  // An Enter waiting to open the top hit of one search (its id). A newer search or any change of
+  // the open entry supersedes it.
+  const enterFor = useRef<number | null>(null);
   const scope = scopeOf(filters.source);
   const { theme, toggle: toggleTheme } = useTheme();
   const pulse = useAsciiField(canvasRef, scope.color, theme);
@@ -69,9 +71,7 @@ function Search() {
   // A layout effect, so the search is sent within the render: a key pressed right after typing
   // (Enter) already sees it as the latest, not a passive effect still waiting for the next frame.
   useLayoutEffect(() => client.search(q, filters), [q, filters]);
-  useEffect(() => {
-    if (enterPending.current && client.isLatest(results?.id)) { enterPending.current = false; listRef.current?.openActive(); }
-  }, [results?.id]);
+  useEffect(() => openOnEnter(), [results?.id]);
   const open = sel && 'row' in sel ? sel.row : null;
   const link = sel && 'link' in sel ? sel.link : '';
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
@@ -107,12 +107,24 @@ function Search() {
   const setSource = (source: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source, verb: f.verb, examples: f.examples }));
 
   const openRow = useCallback((row: Row) => {
+    enterFor.current = null;
     setSel({ row });
     // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
     const pane = detailRef.current?.getBoundingClientRect();
     if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
   }, []);
-  const close = useCallback(() => { enterPending.current = false; setSel(null); }, []);
+  const close = useCallback(() => { enterFor.current = null; setSel(null); }, []);
+
+  /** Open the cursor's row for a pending Enter, once its search's results are on screen. */
+  const openOnEnter = () => {
+    const id = enterFor.current;
+    if (id === null || id !== client.latest || results?.id !== id) return; // superseded, or still coming
+    const cur = listRef.current?.current();
+    if (!cur) { enterFor.current = null; return; }
+    if (cur.row) return openRow(cur.row);
+    // Not materialised yet (Enter right after typing): fetch it, unless superseded meanwhile.
+    client.request('rows', { refs: [cur.ref] }).then(([row]) => { if (enterFor.current === id && client.latest === id) openRow(row); });
+  };
 
   const onKeyDown = (e: KeyboardEvent) => {
     // The box is autofocused, so the "/" shortcut lands here; nobody searches for a leading slash.
@@ -124,8 +136,9 @@ function Search() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); nav.move(-1); }
     else if (e.key === 'Enter') {
       e.preventDefault();
-      // Enter means the top hit of what is typed: if those results are still coming, open on arrival.
-      if (client.isLatest(results?.id)) nav.openActive(); else enterPending.current = true;
+      // Enter means the cursor's row in the results of what is typed: if they are still coming, open on arrival.
+      enterFor.current = client.latest;
+      openOnEnter();
     }
   };
 
