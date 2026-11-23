@@ -134,6 +134,8 @@ function Search() {
     else if (e.key === 'Enter') {
       e.preventDefault();
       // Enter means the cursor's row in the results of what is typed: if they are still coming, open on arrival.
+      // It is the later choice, so it also drops a deep link still being looked up.
+      if (link) setSel(null);
       setEnterFor(client.latest);
     }
   };

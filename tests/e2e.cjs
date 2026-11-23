@@ -273,6 +273,19 @@ const scenarios = [
     },
   },
   {
+    name: 'Enter over a pending deep link',
+    async setup(ctx) { this.release = await hold(ctx, '**/idx/graph.json*'); },
+    async run(p) {
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+      await p.fill('input[type=search]', 'get-azvm');
+      await p.keyboard.press('Enter'); // the later choice: it wins over the link still being looked up
+      this.release();
+      await titleIs(p, 'Get-AzVM');
+      await p.waitForFunction(() => new URLSearchParams(location.search).get('c') === 'az:Get-AzVM');
+    },
+  },
+  {
     name: 'dismissed deep link',
     async setup(ctx) { this.release = await hold(ctx, '**/idx/graph.json*'); },
     async run(p) {
