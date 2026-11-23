@@ -42,18 +42,15 @@ export function Detail({ row, sources, client, onOpen, onClose }: Props) {
     <article class="detail" ref={top} style={{ '--src': sourceColor(row.source) } as any} aria-labelledby="detail-title">
       <div class="detail-head">
         <button type="button" class="icon-btn detail-back" onClick={onClose} aria-label="Back to results"><ArrowLeft size={18} /></button>
-        <p class="detail-crumbs">
-          <span class="source-dot" aria-hidden="true" />
-          <span>{src.label}</span>
-          {row.module && row.source !== 'errors' && <><span aria-hidden="true">/</span><span>{row.module}</span></>}
-        </p>
         <h2 id="detail-title" class="detail-title">
           <code>{row.name}</code>
           <CopyBtn text={row.name} label="Copy name" />
         </h2>
         <div class="tags">
-          {row.source === 'errors' ? <span class="tag">{row.module}</span> : row.verb && <span class="tag">{row.verb}</span>}
-          {row.category && <span class="tag">{row.category}</span>}
+          <span class="tag tag-source"><span class="source-dot" aria-hidden="true" />{src.short}</span>
+          {row.source === 'errors' ? <span class="tag">{row.module}</span> : row.module && <span class="tag">{row.module}</span>}
+          {row.verb && <span class="tag">{row.verb}</span>}
+          {row.category && row.category !== row.module && !row.module.endsWith('.' + row.category) && <span class="tag">{row.category}</span>}
           {row.extra && <span class={'tag' + (row.extra === 'beta' ? ' tag-warn' : '')}>{row.extra}</span>}
           {row.perms > 0 && <span class="tag">{row.perms} permission{row.perms === 1 ? '' : 's'}</span>}
         </div>
@@ -111,7 +108,7 @@ function CmdletBody({ c, row }: { c: any; row: Row }) {
       {sets.length > 0 && (
         <section class="block">
           <h3>Syntax{sets.length > 1 ? <span class="h-note"> · {sets.length} parameter sets</span> : null}</h3>
-          {sets.map((s, i) => <Code key={i} src={s} />)}
+          {sets.map((s, i) => <Code key={i} src={s} view={reflowSyntax(s)} syntax />)}
         </section>
       )}
 
@@ -167,11 +164,30 @@ function ErrorBody({ e, row }: { e: any; row: Row }) {
   );
 }
 
-function Code({ src }: { src: string }) {
-  const toks = useMemo(() => tokenize(src), [src]);
+/** One line per set, with no-break spaces inside each [...] group so a parameter wraps as a unit. */
+function reflowSyntax(s: string): string {
+  const flat = s.replace(/\s+/g, ' ').trim();
+  let depth = 0, out = '';
+  for (const ch of flat) {
+    if (ch === '[') depth++;
+    if (ch === ']') depth = Math.max(0, depth - 1);
+    out += ch === ' ' && depth > 0 ? '\u00a0' : ch;
+  }
+  return out;
+}
+
+const renderToks = (s: string) => tokenize(s).map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>));
+
+function Code({ src, view, syntax }: { src: string; view?: string; syntax?: boolean }) {
+  const body = useMemo(() => {
+    if (!syntax) return renderToks(src);
+    // Each depth-0 group ("[-Name <Type>]") is a non-wrapping unit; breaks only fall between groups.
+    const groups = (view ?? src).split(' ');
+    return groups.flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderToks(g.replace(/\u00a0/g, ' '))}</span>]);
+  }, [src, view, syntax]);
   return (
-    <div class="code">
-      <pre><code>{toks.map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>))}</code></pre>
+    <div class={'code' + (syntax ? ' code-syntax' : '')}>
+      <pre><code>{body}</code></pre>
       <CopyBtn text={src} label="Copy code" small />
     </div>
   );

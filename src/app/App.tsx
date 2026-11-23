@@ -82,7 +82,7 @@ export default function App({ sources, total }: Props) {
     if (canvasRef.current) {
       const f = new AsciiField({ canvas: canvasRef.current });
       field.current = f;
-      f.setTone(sourceColor(initial.filters.source), toneDim());
+      f.setTone(fieldColor(initial.filters.source), toneDim());
       document.fonts?.ready.then(() => f.refresh());
       f.start();
       const quiet = () => f.setQuiet([...document.querySelectorAll('[data-quiet]')].map((el) => el.getBoundingClientRect()));
@@ -114,7 +114,7 @@ export default function App({ sources, total }: Props) {
 
   // Source tint for the field; keep the active tab visible on narrow screens.
   useEffect(() => {
-    field.current?.setTone(sourceColor(filters.source), toneDim());
+    field.current?.setTone(fieldColor(filters.source), toneDim());
     document.querySelector('.source.is-on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [filters.source, theme]);
 
@@ -152,7 +152,13 @@ export default function App({ sources, total }: Props) {
   const setFilter = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
   const setSource = (s: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source: s, examples: f.examples, verb: f.verb }));
 
-  const open = useCallback((row: Row) => { setOpenRow(row); setOpenKey(row.key); }, []);
+  const open = useCallback((row: Row) => {
+    setOpenRow(row);
+    setOpenKey(row.key);
+    // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
+    const pane = document.querySelector('.pane-detail')?.getBoundingClientRect();
+    if (pane && pane.width) field.current?.pulse(pane.left + 40, pane.top + 40, 0.7);
+  }, []);
   const close = useCallback(() => { setOpenKey(''); setOpenRow(null); }, []);
 
   const onInputKey = async (e: KeyboardEvent) => {
@@ -174,7 +180,7 @@ export default function App({ sources, total }: Props) {
   const srcMeta = sources.find((s) => s.id === filters.source);
   const placeholder = srcMeta
     ? srcMeta.kind === 'error' ? 'Search error codes or messages: AADSTS50126, 0x80240017…' : `Search ${fmt.format(srcMeta.count)} ${srcMeta.short} cmdlets`
-    : `Search ${fmt.format(total)} cmdlets and error codes`;
+    : `Search ${fmt.format(total)} cmdlets & errors`;
 
   const resultsLabel = refs == null ? 'Loading index…' : `${fmt.format(refs.length)} ${refs.length === 1 ? 'result' : 'results'}`;
   const toggleTheme = () => {
@@ -272,10 +278,22 @@ export default function App({ sources, total }: Props) {
   );
 }
 
+/** Source hue for the canvas; darkened in light theme so glyphs read on the pale ground. */
+function fieldColor(s: string) {
+  const hex = sourceColor(s);
+  if (toneDim() > 0.8) {
+    const n = parseInt(hex.slice(1), 16);
+    const k = 0.62;
+    const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * k).toString(16).padStart(2, '0'));
+    return '#' + c.join('');
+  }
+  return hex;
+}
+
 function toneDim() {
   const root = document.documentElement;
   const light = root.dataset.theme ? root.dataset.theme === 'light' : !matchMedia('(prefers-color-scheme: dark)').matches;
-  return light ? 0.5 : 0.78;
+  return light ? 0.85 : 0.78;
 }
 
 function SourceTab({ id, label, count, current, onPick }: { id: SourceId | 'all'; label: string; count: number; current: string; onPick: (s: any) => void }) {

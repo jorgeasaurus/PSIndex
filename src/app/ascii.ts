@@ -139,7 +139,7 @@ export class AsciiField {
     const mx = this.mouse.x, my = this.mouse.y;
     const live = this.ripples.filter((r) => now - r.t0 < 2200);
     this.ripples = live;
-    const headerFade = Math.min(1, 420 / Math.max(1, innerHeight)); // field is strongest in the top band
+    const headerFade = Math.min(1, (innerWidth < 640 ? 520 : 420) / Math.max(1, innerHeight)); // field is strongest in the top band
 
     for (let y = 0; y < rows; y++) {
       const py = y * cell;
@@ -164,11 +164,12 @@ export class AsciiField {
         const md = Math.hypot(px - mx, py - my);
         if (md < 160) val += (1 - md / 160) * 0.45;
         val *= fall;
+        const qpad = innerWidth < 640 ? 6 : 18;
         for (const q of this.quiet) {
           const dx = Math.max(q.left - px, 0, px - q.right);
           const dy = Math.max(q.top - py, 0, py - q.bottom);
           const d = Math.max(dx, dy);
-          if (d < 18) val *= 0.08 + (d / 18) * 0.92;
+          if (d < qpad) val *= 0.08 + (d / qpad) * 0.92;
         }
         if (val <= 0.06) continue;
         let gi = Math.min(nRamp - 1, Math.floor(val * nRamp));
