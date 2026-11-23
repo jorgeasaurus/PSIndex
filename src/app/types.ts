@@ -30,7 +30,6 @@ export interface IndexShard {
   extras: string[];
 }
 
-/** Module files under public/data/<source>/, as written by the pipelines. */
 /** A parameter as a pipeline documents it (MECM does; others are parsed from the syntax). */
 export interface DocumentedParam {
   name: string;
@@ -47,7 +46,7 @@ export interface CmdletDetail {
   parameters: DocumentedParam[];
   description: string;
 }
-/** A module file (public/data/<source>/<file>.json): its cmdlets by name. */
+/** A module file (artifactPath.module): its cmdlets by name. */
 export type CmdletFile = Record<string, CmdletDetail>;
 
 export interface Filters {

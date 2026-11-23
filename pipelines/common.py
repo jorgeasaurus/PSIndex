@@ -24,12 +24,7 @@ def output_dir():
 
 
 def previous_manifest_version(source_id):
-    """The source version the last successful run committed (manifest.json "v"), or None.
-
-    The manifest version is the only version anything downstream reads (build-index shows it;
-    check-shrink refuses a refresh that loses it), so a failed PowerShell Gallery lookup falls
-    back to it directly.
-    """
+    """The source version the last successful run committed (manifest.json "v"), or None."""
     try:
         return json.loads((source_dir(source_id) / "manifest.json").read_text(encoding="utf-8")).get("v")
     except (OSError, ValueError):
@@ -37,10 +32,16 @@ def previous_manifest_version(source_id):
 
 
 def source_version(found, source_id):
-    """The version this run found, else the last committed one (reported, so a lost lookup is visible)."""
+    """The version this run found, else the last committed one.
+
+    The policy for a failed PowerShell Gallery lookup: the refresh still goes through (its cmdlets
+    are current) and keeps the last known version, with a workflow warning so the stale label is
+    visible. Only with no committed version either does the manifest get null, which
+    scripts/check-shrink.py then refuses.
+    """
     if found:
         return found
     previous = previous_manifest_version(source_id)
     if previous:
-        print(f"  PowerShell Gallery lookup failed; keeping the previous version {previous}")
+        print(f"::warning::{source_id}: PowerShell Gallery lookup failed; keeping the previous version {previous}")
     return previous

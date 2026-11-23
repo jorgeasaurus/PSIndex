@@ -1,13 +1,13 @@
 // Build-time step: turns the raw pipeline output in data/<source>/ into
-//   src/sources.generated.json        – the source list (single source of truth for the app and worker)
-//   public/idx/<source>.json          – columnar search index (names + facets), loaded first
-//   public/idx/<source>.desc.json     – short descriptions aligned to the index, loaded after first paint
-//   public/data/<source>/<module>.json – per-module detail, fetched on demand
+//   src/sources.generated.json – the source list and build id (single source of truth for the app and worker)
+//   public/a/<build>/…        – per source: search shard, description shard, module files
+//                               (paths: src/app/artifacts.ts)
 // Everything written here is typed against src/app/types.ts, which the app reads it as.
 import { readFile, writeFile, readdir, mkdir, rm, rename } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, basename, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
+import { artifactPath } from '../src/app/artifacts.ts';
 import type { CmdletDetail, CmdletFile, DocumentedParam, IndexShard, SourceMeta } from '../src/app/types.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -113,7 +113,7 @@ async function emit(path: string, text: string) {
   await writeFile(join(STAGE, path), text);
 }
 
-/** Write a source's normalized module files (data/<source>/<file>.json) and return its rows, sorted by name. */
+/** Write a source's normalized module files and return its rows, sorted by name. */
 async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[] }> {
   const dir = join(DATA, src.id);
   const manifest = await readJson(join(dir, 'manifest.json'));
@@ -133,7 +133,7 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[] 
       if (!holders.has(name)) holders.set(name, new Map());
       holders.get(name)!.set(stem, detail);
     }
-    await emit(`data/${src.id}/${f}`, JSON.stringify(file));
+    await emit(artifactPath.module(src.id, stem), JSON.stringify(file));
   }
   if (!Array.isArray(manifest.d)) throw new Error(`${src.id} manifest: d is not a list`);
   const version = manifest.v;
@@ -195,8 +195,8 @@ async function main() {
   for (const src of SOURCES) {
     const { version, rows } = await loadRows(src);
     const { index, desc } = buildShard(rows);
-    await emit(`idx/${src.id}.json`, JSON.stringify(index));
-    await emit(`idx/${src.id}.desc.json`, JSON.stringify(desc));
+    await emit(artifactPath.shard(src.id), JSON.stringify(index));
+    await emit(artifactPath.desc(src.id), JSON.stringify(desc));
     const { id, label, short, color, sample } = src;
     const extra = src.extra && { label: src.extra.label, ...(src.extra.warn && { warn: src.extra.warn }) };
     sources.push({ id, label, short, color, sample, extra, count: rows.length, version });

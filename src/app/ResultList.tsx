@@ -1,8 +1,8 @@
 import type { ComponentChildren, Ref } from 'preact';
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { SearchClient } from './client';
 import { isWarnExtra, queryTokens, sourceOf, srcStyle } from './sources';
-import type { Row } from './types';
+import type { Results, Row } from './types';
 
 const ROW_H = 64;
 const OVERSCAN = 8;
@@ -17,37 +17,34 @@ export interface ListNav {
 interface Props {
   navRef: Ref<ListNav>;
   client: SearchClient;
-  refs: Int32Array | null;
+  /** The search's results, or null while the first ones load. A new id scrolls back to the top and
+   * resets the cursor; a refresh under the same id (descriptions arriving) keeps both. */
+  results: Results | null;
   openKey: string;
   onOpen: (r: Row) => void;
   query: string;
-  /** Id of the search `refs` answer; a new id scrolls back to the top, a refresh under the same id keeps the place. */
-  searchId: number;
   empty: ComponentChildren;
 }
 
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ navRef, client, refs, openKey, onOpen, query, searchId, empty }: Props) {
+export function ResultList({ navRef, client, results, openKey, onOpen, query, empty }: Props) {
+  const refs = results?.refs ?? null;
+  const searchId = results?.id;
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
-  // The keyboard cursor belongs to one result set: a new search id puts it back on the first row,
-  // a refresh under the same id keeps it.
-  const [cursor, setCursor] = useState({ id: searchId, i: 0 });
-  const active = cursor.id === searchId ? cursor.i : 0;
-  const setActive = (i: number) => setCursor({ id: searchId, i });
+  // The keyboard cursor is a row (its ref) in one result set: a new search id puts it back on the
+  // first row; a refresh under the same id can reorder rows, so the cursor follows its row.
+  const [cursor, setCursor] = useState<{ id: number | undefined; ref: number }>({ id: undefined, ref: -1 });
+  const active = useMemo(() => (refs && cursor.id === searchId ? Math.max(0, refs.indexOf(cursor.ref)) : 0), [refs, cursor, searchId]);
+  const setActive = (i: number) => refs && setCursor({ id: searchId, ref: refs[i] });
 
   useImperativeHandle(navRef, () => ({
     move: (delta) => {
       if (!refs?.length) return;
       const i = Math.max(0, Math.min(refs.length - 1, active + delta));
       setActive(i);
-      // Keyboard moves keep the cursor in view (hover only highlights, so it never scrolls).
-      const el = scroller.current;
-      if (!el) return;
-      const top = i * ROW_H;
-      if (top < el.scrollTop) el.scrollTop = top;
-      else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
+      reveal(i); // keyboard moves keep the cursor in view (hover only highlights, so it never scrolls)
     },
     current: () => {
       if (!refs?.length) return null;
@@ -57,11 +54,27 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
     },
   }), [client, refs, rows, active, searchId]);
 
-  // A new search starts at the top; a refresh of the same search (descriptions arriving) keeps the user's place.
+  /** Scroll just enough to show row i. */
+  const reveal = (i: number) => {
+    const el = scroller.current;
+    if (!el) return;
+    const top = i * ROW_H;
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
+  };
+
+  // A new search starts at the top; a refresh of the same search (descriptions arriving) keeps the
+  // user's place, and if it moved the cursor's row, brings that row into view.
+  const lastId = useRef(searchId);
   useLayoutEffect(() => {
-    if (scroller.current) scroller.current.scrollTop = 0;
+    if (lastId.current !== searchId) {
+      lastId.current = searchId;
+      if (scroller.current) scroller.current.scrollTop = 0;
+    } else if (cursor.id === searchId) {
+      reveal(active);
+    }
     measure();
-  }, [searchId]);
+  }, [refs]);
 
   const measure = () => {
     const el = scroller.current;

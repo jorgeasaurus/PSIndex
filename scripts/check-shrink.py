@@ -7,7 +7,10 @@ Compares data/<id>/manifest.json in the working tree against the committed
 version (git HEAD). Exits 1 when the entry count dropped by more than the
 ratio (default 0.10), which usually means an upstream clone or fetch failed
 and the pipeline wrote a partial dataset. Also exits 1 when the recorded
-version disappears (null), which means a version lookup failed.
+version disappears (null): the version could not be read from the docs (Az's
+azps-* folder name) and no earlier one was kept. Failed PowerShell Gallery
+lookups never get here; pipelines/common.py source_version keeps the last
+known version for them.
 """
 import json
 import subprocess
@@ -34,8 +37,7 @@ if drop > limit:
     print(f"::error::{src} lost {old - new} entries ({drop:.1%} > {limit:.0%}); refusing to commit a partial refresh")
     sys.exit(1)
 
-# A version that disappears means a lookup (e.g. PowerShell Gallery) failed, not a real release.
-# Pipelines write null when a version is unknown.
+# A version that disappears is a degraded refresh, not a real release (see the docstring for when).
 old_v, new_v = old_doc.get("v"), new_doc.get("v")
 if old_v and not new_v:
     print(f"::error::{src} version went from {old_v!r} to {new_v!r}; refusing to commit a degraded refresh")

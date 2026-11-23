@@ -41,8 +41,17 @@ const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] }
 
 // ---- Search session ------------------------------------------------------------------------
 
-/** The detail pane's entry: a row, or a deep-linked key still being looked up (only ever the URL's). */
-type Selection = { row: Row } | { link: string } | null;
+/**
+ * The detail pane's entry, including the two ways it can be waiting on the worker:
+ *   row:   an entry is open
+ *   link:  a deep-linked key is being looked up (only ever the URL's)
+ *   enter: Enter was pressed for search `enter`; it opens that search's cursor row once its
+ *          results are on screen, and `shown` stays open meanwhile
+ * Every change is one setSel, so a new choice always replaces a pending one.
+ */
+type Selection = { row: Row } | { link: string } | { enter: number; shown: Row | null } | null;
+/** A pending Enter given up: the pane goes back to what it showed. */
+const settle = (s: Selection): Selection => (s && 'enter' in s ? s.shown && { row: s.shown } : s);
 
 function Search() {
   const [initial] = useState(readUrl);
@@ -58,19 +67,17 @@ function Search() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const listRef = useRef<ListNav>(null);
-  // An Enter waiting to open the cursor's row in one search's results (that search's id).
-  // A newer search or any change of the open entry clears it.
-  const [enterFor, setEnterFor] = useState<number | null>(null);
   const scope = scopeOf(filters.source);
   const { theme, toggle: toggleTheme } = useTheme();
   const pulse = useAsciiField(canvasRef, scope.color, theme);
-  const refs = results?.refs ?? null;
 
   // A layout effect, so the search is sent within the render: a key pressed right after typing
   // (Enter) already sees it as the latest, not a passive effect still waiting for the next frame.
-  useLayoutEffect(() => { client.search(q, filters); setEnterFor(null); }, [q, filters]);
-  const open = sel && 'row' in sel ? sel.row : null;
+  // A newer search also gives up an Enter pressed for the previous one.
+  useLayoutEffect(() => { client.search(q, filters); setSel(settle); }, [q, filters]);
+  const open = !sel ? null : 'row' in sel ? sel.row : 'enter' in sel ? sel.shown : null;
   const link = sel && 'link' in sel ? sel.link : '';
+  const enterFor = sel && 'enter' in sel ? sel.enter : null;
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
   const openKey = open?.key ?? link;
   // Each entry opens at its top (the pane, not the article, is what scrolls).
@@ -81,7 +88,7 @@ function Search() {
   useEffect(() => {
     if (!link) return;
     let live = true; // opening or closing an entry replaces the selection and supersedes this lookup
-    client.request('find', { key: link }).then((row) => live && select(row && { row }));
+    client.request('find', { key: link }).then((row) => live && setSel(row && { row }));
     return () => { live = false; };
   }, [link]);
 
@@ -103,22 +110,20 @@ function Search() {
   // Verb and the examples flag mean the same in every source, so they survive a source switch.
   const setSource = (source: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source, verb: f.verb, examples: f.examples }));
 
-  /** Every change of the open entry goes through here, so it also drops a pending Enter. */
-  const select = (next: Selection) => { setEnterFor(null); setSel(next); };
   const openRow = useCallback((row: Row) => {
-    select({ row });
+    setSel({ row });
     // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
     const pane = detailRef.current?.getBoundingClientRect();
     if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
   }, []);
-  const close = useCallback(() => select(null), []);
+  const close = useCallback(() => setSel(null), []);
 
   // Resolve a pending Enter once its search's results are the ones on screen.
   useEffect(() => {
     if (enterFor === null || results?.id !== enterFor) return;
     const row = listRef.current?.current();
-    if (!row) return setEnterFor(null);
-    let live = true; // a newer search or another selection clears enterFor and supersedes this
+    if (!row) return setSel(settle); // no results: nothing to open
+    let live = true; // a newer search or another selection replaces the pending Enter
     row.then((r) => live && openRow(r));
     return () => { live = false; };
   }, [enterFor, results?.id]);
@@ -133,10 +138,9 @@ function Search() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); nav.move(-1); }
     else if (e.key === 'Enter') {
       e.preventDefault();
-      // Enter means the cursor's row in the results of what is typed: if they are still coming, open on arrival.
-      // It is the later choice, so it also drops a deep link still being looked up.
-      if (link) setSel(null);
-      setEnterFor(client.latest);
+      // Enter means the cursor's row in the results of what is typed: if they are still coming, open on
+      // arrival. It is the later choice, so it replaces a deep link still being looked up.
+      setSel({ enter: client.latest, shown: open });
     }
   };
 
@@ -183,11 +187,10 @@ function Search() {
           <ResultList
             navRef={listRef}
             client={client}
-            refs={refs}
+            results={results}
             openKey={openKey}
             onOpen={openRow}
             query={q}
-            searchId={results?.id ?? 0}
             empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => setFilters(EMPTY_FILTERS)} />}
           />
         )

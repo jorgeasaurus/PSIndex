@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { artifactPath } from './artifacts';
 import { SOURCES, assetUrl, queryTokens, scopeOf } from './sources';
 import type { Facets, Filters, FromWorker, IndexShard, RequestType, Requests, Row, ToWorker } from './types';
 
@@ -35,8 +36,8 @@ function parseKey(key: string) {
   return { source, name, module };
 }
 
-async function getJson<T>(file: string): Promise<T> {
-  const url = new URL(assetUrl(`idx/${file}`), self.location.origin);
+async function getJson<T>(path: string): Promise<T> {
+  const url = new URL(assetUrl(path), self.location.origin);
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status} for ${url.pathname}`);
   return r.json();
@@ -44,7 +45,7 @@ async function getJson<T>(file: string): Promise<T> {
 
 async function loadSource(si: number): Promise<Loaded> {
   const { id } = SOURCES[si];
-  const shard = await getJson<IndexShard>(`${id}.json`);
+  const shard = await getJson<IndexShard>(artifactPath.shard(id));
   const lname = shard.n.map((n) => n.toLowerCase());
   const count = new Map<string, number>();
   for (const n of shard.n) count.set(n, (count.get(n) ?? 0) + 1);
@@ -62,7 +63,7 @@ async function loadSource(si: number): Promise<Loaded> {
 }
 
 async function loadDescriptions(L: Loaded) {
-  const desc = await getJson<string[]>(`${L.id}.desc.json`).catch(() => null);
+  const desc = await getJson<string[]>(artifactPath.desc(L.id)).catch(() => null);
   if (!desc) return; // descriptions only refine ranking; without them names still search
   L.desc = desc;
   L.ldesc = desc.map((d) => d.toLowerCase());

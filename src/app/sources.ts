@@ -18,7 +18,7 @@ export const SOURCE_LABELS = list.format(SOURCES.map((s) => s.label));
  * URL of a build artifact (idx/… shards, data/… module files). The build id is in the path and is
  * a hash of the artifacts, so a page and its worker only ever read files from their own build.
  */
-export const assetUrl = (path: string) => `/a/${generated.build}/${path}`;
+export const assetUrl = (path: string) => `/a/${generated.build}/${path.split('/').map(encodeURIComponent).join('/')}`;
 
 /** The extra value a source flags as a caution, e.g. Graph's "beta" API. */
 export const isWarnExtra = (s: SourceMeta, extra: string) => !!extra && extra === s.extra?.warn;

@@ -1,3 +1,4 @@
+import { artifactPath } from './artifacts';
 import { assetUrl } from './sources';
 import type { CmdletFile, Filters, FromWorker, RequestType, Requests, Results, ToWorker } from './types';
 
@@ -55,12 +56,12 @@ export class SearchClient {
 
 const moduleCache = new Map<string, Promise<CmdletFile>>();
 
-/** Fetch (once) a module file written by the build (public/data/<source>/<module>.json). */
+/** Fetch (once) a module file written by the build. */
 export function loadModule(source: string, file: string): Promise<CmdletFile> {
   const key = `${source}/${file}`;
   let p = moduleCache.get(key);
   if (!p) {
-    p = fetch(assetUrl(`data/${source}/${encodeURIComponent(file)}.json`)).then((r) => {
+    p = fetch(assetUrl(artifactPath.module(source, file))).then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     });

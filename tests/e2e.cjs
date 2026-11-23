@@ -105,7 +105,7 @@ const scenarios = [
   },
   {
     name: 'late descriptions',
-    async setup(ctx) { this.release = await hold(ctx, '**/idx/graph.desc.json*'); },
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.desc.json`); },
     async run(p) {
       await p.goto(`${BASE}/?s=graph&q=mguser`);
       await p.waitForFunction(() => document.querySelectorAll('.result:not(.result-skel)').length > 5);
@@ -116,6 +116,25 @@ const scenarios = [
       await p.waitForFunction(() => [...document.querySelectorAll('.result .result-desc')].some((d) => d.textContent && !d.querySelector('.result-module')));
       const top = await p.evaluate(() => document.querySelector('.results').scrollTop);
       check(top >= 6000, 'late descriptions keep the scroll position', `scrollTop ${top}`);
+    },
+  },
+  {
+    name: 'cursor follows its row through a description refresh',
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.desc.json`); },
+    async run(p) {
+      await p.goto(`${BASE}/?s=graph`);
+      await rowsReady(p);
+      await p.fill('input[type=search]', 'site settings'); // descriptions add matches above row 4 for this query
+      await p.waitForFunction(() => document.querySelectorAll('.result:not(.result-skel)').length > 5);
+      for (let k = 0; k < 4; k++) await p.keyboard.press('ArrowDown');
+      const before = await p.textContent('.result.is-active .result-name');
+      const descArrived = p.waitForResponse(/graph\.desc\.json/);
+      this.release();
+      await descArrived;
+      // The refresh can add description matches above the cursor; it must stay on the same cmdlet.
+      await p.waitForFunction(() => [...document.querySelectorAll('.result .result-desc')].some((d) => d.textContent && !d.querySelector('.result-module')));
+      const after = await p.textContent('.result.is-active .result-name');
+      check(before && before === after, 'cursor stays on its cmdlet when descriptions re-rank the list', `${before} -> ${after}`);
     },
   },
   {
@@ -238,7 +257,7 @@ const scenarios = [
     name: 'failed index load',
     // The page reports the failure; the failed fetch's own console error is expected here.
     allowErrors: true,
-    async setup(ctx) { await ctx.route('**/idx/az.json*', (r) => r.fulfill({ status: 500, body: 'boom' })); },
+    async setup(ctx) { await ctx.route(`**${BUILD_PATH}idx/az.json`, (r) => r.fulfill({ status: 500, body: 'boom' })); },
     async run(p) {
       await p.goto(BASE);
       await p.waitForSelector('[role=alert]');
@@ -248,7 +267,7 @@ const scenarios = [
     name: 'missing description shard',
     // The failed fetch logs its own console error; that is the point of the scenario.
     allowErrors: true,
-    async setup(ctx) { await ctx.route('**/idx/mecm.desc.json*', (r) => r.fulfill({ status: 404, body: '' })); },
+    async setup(ctx) { await ctx.route(`**${BUILD_PATH}idx/mecm.desc.json`, (r) => r.fulfill({ status: 404, body: '' })); },
     async run(p) {
       const descTried = p.waitForResponse(/\/idx\/mecm\.desc\.json/);
       await p.goto(`${BASE}/?s=mecm`);
@@ -261,7 +280,7 @@ const scenarios = [
   },
   {
     name: 'superseded Enter',
-    async setup(ctx) { this.release = await hold(ctx, '**/idx/graph.json*'); },
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
     async run(p) {
       await p.goto(BASE);
       await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
@@ -278,7 +297,7 @@ const scenarios = [
   },
   {
     name: 'Enter over a pending deep link',
-    async setup(ctx) { this.release = await hold(ctx, '**/idx/graph.json*'); },
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
     async run(p) {
       await p.goto(`${BASE}/?c=graph:Get-MgUser`);
       await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
@@ -291,7 +310,7 @@ const scenarios = [
   },
   {
     name: 'dismissed deep link',
-    async setup(ctx) { this.release = await hold(ctx, '**/idx/graph.json*'); },
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
     async run(p) {
       await p.goto(`${BASE}/?c=graph:Get-MgUser`);
       // Wait for the interactive session (not the static server-rendered shell), then click Home
