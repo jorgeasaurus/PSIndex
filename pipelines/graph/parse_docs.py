@@ -22,7 +22,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from common import keep_previous_versions, output_dir
+from common import output_dir, source_version
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -314,7 +314,6 @@ def main():
     # Fetch module versions from PowerShell Gallery
     unique_modules = sorted(set(c["module"] for c in all_cmdlets))
     module_versions = fetch_all_module_versions(unique_modules)
-    keep_previous_versions(module_versions, unique_modules, "graph")
 
     # Build slim manifest (short keys, no descriptions or moduleVersion)
     DEFAULT_DESC = "Microsoft Graph PowerShell cmdlet."
@@ -339,7 +338,7 @@ def main():
     for mod, ver in module_versions.items():
         if ver:
             version_counts[ver] += 1
-    graph_version = max(version_counts, key=version_counts.get) if version_counts else None
+    graph_version = source_version(max(version_counts, key=version_counts.get) if version_counts else None, "graph")
 
     manifest_wrapper = {"v": graph_version, "d": manifest}
     manifest_path = data_dir / "manifest.json"

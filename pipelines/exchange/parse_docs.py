@@ -19,7 +19,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-from common import keep_previous_versions, output_dir
+from common import output_dir, source_version
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -199,8 +199,7 @@ def main():
 
     print("Fetching module versions from PowerShell Gallery...")
     module_versions = fetch_module_versions()
-    keep_previous_versions(module_versions, MODULE_PACKAGE_MAP, 'exchange')
-    primary_version = module_versions.get('ExchangePowerShell')
+    primary_version = source_version(module_versions.get('ExchangePowerShell'), 'exchange')
 
     manifest_entries = []
     descriptions = {}

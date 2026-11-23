@@ -21,8 +21,8 @@ pipelines/<source>/   parsers moved from the five old repos (Python, stdlib only
 data/<source>/        committed JSON: manifest.json, descriptions.json, modules/ or products/
         │  npm run build → scripts/build-index.ts
         ▼
-public/idx/           columnar search shards (~245 KB gzipped for all 41k cmdlets)
-public/data/          per-module detail, fetched only when an entry is opened
+public/a/<build>/idx/  columnar search shards (~245 KB gzipped for all 41k cmdlets)
+public/a/<build>/data/ per-module detail, fetched only when an entry is opened
         │  astro build
         ▼
 dist/                 static site, deployed by Vercel on every push to main

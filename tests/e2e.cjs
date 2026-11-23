@@ -3,7 +3,8 @@
 // Needs Playwright with Chromium available (`npx playwright install chromium`).
 const { spawn } = require('node:child_process');
 const { chromium } = require('playwright');
-const { total } = require('../src/sources.generated.json');
+const { total, build } = require('../src/sources.generated.json');
+const BUILD_PATH = `/a/${build}/`;
 
 const PORT = 4399;
 const BASE = `http://localhost:${PORT}`;
@@ -57,7 +58,7 @@ const scenarios = [
       check((await p.textContent('.detail-title code')) === 'Get-MgUser', 'hyphenless query ranks Get-MgUser first');
       check((await p.locator('.params tbody tr').count()) > 3, 'syntax parsed into parameters');
       check(param(p, 'c') === 'graph:Get-MgUser', 'open entry is in the URL');
-      check(moduleUrls.length > 0 && moduleUrls.every((u) => u.includes('?v=')), 'module files fetched at versioned URLs', moduleUrls[0]);
+      check(moduleUrls.length > 0 && moduleUrls.every((u) => u.includes(BUILD_PATH)), 'module files fetched at versioned URLs', moduleUrls[0]);
     },
   },
   {
@@ -230,7 +231,7 @@ const scenarios = [
       ctx.on('request', (r) => /\/idx\/graph\.json/.test(r.url()) && graphReqs.push(r.url()));
       await p.goto(BASE);
       await rowsReady(p);
-      check(graphReqs.length === 1 && graphReqs[0].includes('?v='), 'shard fetched once, versioned', graphReqs.join(', '));
+      check(graphReqs.length === 1 && graphReqs[0].includes(BUILD_PATH), 'shard fetched once, versioned', graphReqs.join(', '));
     },
   },
   {
@@ -244,13 +245,16 @@ const scenarios = [
     },
   },
   {
-    name: 'mismatched description shard',
-    async setup(ctx) { await ctx.route('**/idx/mecm.desc.json*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '["x"]' })); },
+    name: 'missing description shard',
+    // The failed fetch logs its own console error; that is the point of the scenario.
+    allowErrors: true,
+    async setup(ctx) { await ctx.route('**/idx/mecm.desc.json*', (r) => r.fulfill({ status: 404, body: '' })); },
     async run(p) {
-      const descLoaded = p.waitForResponse(/\/idx\/mecm\.desc\.json/);
+      const descTried = p.waitForResponse(/\/idx\/mecm\.desc\.json/);
       await p.goto(`${BASE}/?s=mecm`);
       await rowsReady(p);
-      await descLoaded;
+      await descTried;
+      // Names still search without descriptions.
       await p.fill('input[type=search]', 'device collection');
       await p.waitForFunction(() => /Collection/.test(document.querySelector('.result .result-name')?.textContent ?? ''));
     },

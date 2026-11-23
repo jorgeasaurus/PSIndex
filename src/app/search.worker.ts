@@ -63,7 +63,7 @@ async function loadSource(si: number): Promise<Loaded> {
 
 async function loadDescriptions(L: Loaded) {
   const desc = await getJson<string[]>(`${L.id}.desc.json`).catch(() => null);
-  if (!desc || desc.length !== L.shard.n.length) return; // never pair mismatched shards
+  if (!desc) return; // descriptions only refine ranking; without them names still search
   L.desc = desc;
   L.ldesc = desc.map((d) => d.toLowerCase());
 }

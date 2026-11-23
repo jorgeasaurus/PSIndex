@@ -2,8 +2,7 @@ node_modules/
 dist/
 .astro/
 .vercel/
-public/data/
-public/idx/
+public/a/
 .impeccable/review/
 .impeccable/mocks/
 __pycache__/

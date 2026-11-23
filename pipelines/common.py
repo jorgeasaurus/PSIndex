@@ -23,22 +23,24 @@ def output_dir():
     return Path(out)
 
 
-def keep_previous_versions(versions, modules, source_id):
-    """Fill in modules whose PowerShell Gallery lookup failed.
+def previous_manifest_version(source_id):
+    """The source version the last successful run committed (manifest.json "v"), or None.
 
-    `versions` maps module name -> version ('' or None when the lookup failed) and is updated in
-    place from the module files the last successful run committed to data/<source_id>/modules/.
+    The manifest version is the only version anything downstream reads (build-index shows it;
+    check-shrink refuses a refresh that loses it), so a failed PowerShell Gallery lookup falls
+    back to it directly.
     """
-    kept = []
-    for module in modules:
-        if versions.get(module):
-            continue
-        try:
-            previous = json.loads((source_dir(source_id) / "modules" / f"{module}.json").read_text(encoding="utf-8")).get("version")
-        except (OSError, ValueError):
-            continue
-        if previous:
-            versions[module] = previous
-            kept.append(module)
-    if kept:
-        print(f"  Gallery lookup failed for {', '.join(kept)}; kept previous versions")
+    try:
+        return json.loads((source_dir(source_id) / "manifest.json").read_text(encoding="utf-8")).get("v")
+    except (OSError, ValueError):
+        return None
+
+
+def source_version(found, source_id):
+    """The version this run found, else the last committed one (reported, so a lost lookup is visible)."""
+    if found:
+        return found
+    previous = previous_manifest_version(source_id)
+    if previous:
+        print(f"  PowerShell Gallery lookup failed; keeping the previous version {previous}")
+    return previous

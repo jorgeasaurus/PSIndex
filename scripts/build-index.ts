@@ -4,15 +4,19 @@
 //   public/idx/<source>.desc.json     – short descriptions aligned to the index, loaded after first paint
 //   public/data/<source>/<module>.json – per-module detail, fetched on demand
 // Everything written here is typed against src/app/types.ts, which the app reads it as.
-import { readFile, writeFile, readdir, mkdir, rm } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { readFile, writeFile, readdir, mkdir, rm, rename } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { join, basename, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import type { CmdletDetail, CmdletFile, DocumentedParam, IndexShard, SourceMeta } from '../src/app/types.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(ROOT, 'data');
-const OUT_IDX = join(ROOT, 'public', 'idx');
-const OUT_DATA = join(ROOT, 'public', 'data');
+// Build artifacts live under public/a/<build>/, where <build> is a hash of their content. A page
+// only ever asks for its own build's paths, so a tab left open across a deploy gets a 404 (and the
+// load-failure path) rather than another build's files; unchanged data keeps its cached URLs.
+const OUT = join(ROOT, 'public', 'a');
+const STAGE = join(OUT, '.staging');
 const DESC_MAX = 220;
 
 interface SourceDef extends Pick<SourceMeta, 'id' | 'label' | 'short' | 'color' | 'sample'> {
@@ -101,8 +105,16 @@ function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, Map
   };
 }
 
-/** Write a source's normalized module files to public/data/<source>/ and return its rows, sorted by name. */
-async function loadRows(src: SourceDef, out: string): Promise<{ version: string; rows: Row[] }> {
+/** Writes build artifacts into the staging directory, hashing paths and bytes in write order. */
+const hash = createHash('sha256');
+async function emit(path: string, text: string) {
+  hash.update(path + '\0' + text + '\0');
+  await mkdir(dirname(join(STAGE, path)), { recursive: true });
+  await writeFile(join(STAGE, path), text);
+}
+
+/** Write a source's normalized module files (data/<source>/<file>.json) and return its rows, sorted by name. */
+async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[] }> {
   const dir = join(DATA, src.id);
   const manifest = await readJson(join(dir, 'manifest.json'));
   if (!isObject(manifest)) throw new Error(`${src.id} manifest: not an object`);
@@ -110,7 +122,7 @@ async function loadRows(src: SourceDef, out: string): Promise<{ version: string;
   if (!isStringRecord(descriptions)) throw new Error(`${src.id} descriptions: not an object of strings`);
   // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
   const holders = new Map<string, Map<string, CmdletDetail>>(); // name -> module file -> entry
-  for (const f of (await readdir(join(dir, 'modules'))).filter((f) => f.endsWith('.json'))) {
+  for (const f of (await readdir(join(dir, 'modules'))).filter((f) => f.endsWith('.json')).sort()) {
     const stem = basename(f, '.json');
     const raw = await readJson(join(dir, 'modules', f));
     if (!isObject(raw) || !isObject(raw.cmdlets)) throw new Error(`${src.id}/${f}: cmdlets is not an object`);
@@ -121,7 +133,7 @@ async function loadRows(src: SourceDef, out: string): Promise<{ version: string;
       if (!holders.has(name)) holders.set(name, new Map());
       holders.get(name)!.set(stem, detail);
     }
-    await writeFile(join(out, f), JSON.stringify(file));
+    await emit(`data/${src.id}/${f}`, JSON.stringify(file));
   }
   if (!Array.isArray(manifest.d)) throw new Error(`${src.id} manifest: d is not a list`);
   const version = manifest.v;
@@ -178,26 +190,22 @@ async function checkRegistries() {
 async function main() {
   const t0 = Date.now();
   await checkRegistries();
-  await rm(OUT_IDX, { recursive: true, force: true });
-  await rm(OUT_DATA, { recursive: true, force: true });
-  await mkdir(OUT_IDX, { recursive: true });
+  await rm(OUT, { recursive: true, force: true });
   const sources: SourceMeta[] = [];
   for (const src of SOURCES) {
-    const out = join(OUT_DATA, src.id);
-    await mkdir(out, { recursive: true });
-    const { version, rows } = await loadRows(src, out);
+    const { version, rows } = await loadRows(src);
     const { index, desc } = buildShard(rows);
-    await writeFile(join(OUT_IDX, `${src.id}.json`), JSON.stringify(index));
-    await writeFile(join(OUT_IDX, `${src.id}.desc.json`), JSON.stringify(desc));
+    await emit(`idx/${src.id}.json`, JSON.stringify(index));
+    await emit(`idx/${src.id}.desc.json`, JSON.stringify(desc));
     const { id, label, short, color, sample } = src;
     const extra = src.extra && { label: src.extra.label, ...(src.extra.warn && { warn: src.extra.warn }) };
     sources.push({ id, label, short, color, sample, extra, count: rows.length, version });
     console.log(`  ${src.id.padEnd(9)} ${String(rows.length).padStart(6)} cmdlets`);
   }
   const total = sources.reduce((a, s) => a + s.count, 0);
-  // Shards are fetched as /idx/<id>.json?v=<build>; the id is bundled into the app, so HTML,
-  // worker, index and descriptions always come from the same build.
-  const build = Date.now().toString(36);
+  // The id is bundled into the page and the worker, which fetch only /a/<build>/… (sources.ts assetUrl).
+  const build = hash.digest('hex').slice(0, 12);
+  await rename(STAGE, join(OUT, build));
   await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ build, total, sources }, null, 2) + '\n');
   console.log(`  ${total} cmdlets indexed in ${Date.now() - t0} ms`);
 }
