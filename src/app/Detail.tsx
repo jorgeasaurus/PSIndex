@@ -69,7 +69,11 @@ export function Detail({ row, sources, client, onOpen, onClose }: Props) {
           <h3>{row.source === 'errors' ? 'Nearby codes' : `Same noun · ${row.name.slice(row.name.indexOf('-') + 1)}`}</h3>
           <ul class="related">
             {related.map((r) => (
-              <li key={r.key}><button type="button" onClick={() => onOpen(r)}><code>{r.name}</code></button></li>
+              <li key={r.key}>
+                <button type="button" onClick={() => onOpen(r)}>
+                  <code>{r.name}</code>{r.dup && r.source !== 'errors' ? <span class="related-mod"> · {r.module}</span> : null}
+                </button>
+              </li>
             ))}
           </ul>
         </section>

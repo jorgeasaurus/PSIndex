@@ -177,6 +177,7 @@ function rowOf(ref: number): Row {
     perms: s.p[i],
     examples: !!s.e[i],
     desc: L.desc ? L.desc[i] : '',
+    dup: L.keys[i].includes('@'),
   };
 }
 

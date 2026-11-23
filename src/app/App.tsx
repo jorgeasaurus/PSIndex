@@ -111,7 +111,11 @@ export default function App({ sources, total }: Props) {
   useEffect(() => {
     if (!openKey) { setOpenRow(null); return; }
     if (openRow?.key === openKey) return;
-    client.current?.find(openKey).then((r) => setOpenRow(r));
+    client.current?.find(openKey).then((r) => {
+      setOpenRow(r);
+      // An old or unqualified link resolved to a row: adopt its canonical key so the row highlights and the URL updates.
+      if (r && r.key !== openKey) setOpenKey(r.key);
+    });
   }, [openKey, booted]);
 
   // Source tint for the field; keep the active tab visible on narrow screens.

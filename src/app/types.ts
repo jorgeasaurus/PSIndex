@@ -48,6 +48,7 @@ export interface Row {
   perms: number;
   examples: boolean;
   desc: string;
+  dup: boolean; // name repeats within its source; show the module to tell the rows apart
 }
 
 export interface Facets {

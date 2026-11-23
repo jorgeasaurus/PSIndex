@@ -138,7 +138,7 @@ async function main() {
   // Shards are fetched as /idx/<id>.json?v=<build>, so an index and its descriptions always come from the same build.
   const build = Date.now().toString(36);
   await writeFile(join(OUT_IDX, 'sources.json'), JSON.stringify({ build, total, sources }));
-  await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ total, sources }, null, 2) + '\n');
+  await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ build, total, sources }, null, 2) + '\n');
   console.log(`  ${total} entries indexed in ${Date.now() - t0} ms`);
 }
 

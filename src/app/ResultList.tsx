@@ -126,7 +126,7 @@ function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number
       <div class="result-line">
         <span class="source-dot" aria-hidden="true" />
         <code class="result-name"><Mark text={row.name} q={query} /></code>
-        <span class="result-meta">{row.source === 'errors' ? row.module : row.extra === 'beta' ? 'beta' : ''}</span>
+        <span class="result-meta">{row.source === 'errors' || row.dup ? row.module : row.extra === 'beta' ? 'beta' : ''}</span>
       </div>
       <p class="result-desc">{row.desc || <span class="result-module">{row.module || row.category}</span>}</p>
     </div>
