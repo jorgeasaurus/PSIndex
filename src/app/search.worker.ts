@@ -17,12 +17,12 @@ interface Loaded {
   ldesc: string[] | null;
 }
 
-let loaded: Loaded[] | null = null;
-let lastSearch: { id: number; q: string; filters: Filters } | null = null;
+type Search = { id: number; q: string; filters: Filters };
+let lastSearch: Search | null = null;
 
 const post = (m: FromWorker, transfer: Transferable[] = []) => (self as DedicatedWorkerGlobalScope).postMessage(m, transfer);
 const encodeRef = (L: Loaded, i: number) => (L.si << SHIFT) | i;
-const decodeRef = (ref: number): [Loaded, number] => [loaded![ref >>> SHIFT], ref & ROW_MASK];
+const decodeRef = (all: Loaded[], ref: number): [Loaded, number] => [all[ref >>> SHIFT], ref & ROW_MASK];
 
 /**
  * Row identity used in links: `source:name`, qualified as `source:name@module` when the name
@@ -68,17 +68,22 @@ async function loadDescriptions(L: Loaded) {
   L.ldesc = desc.map((d) => d.toLowerCase());
 }
 
-async function load() {
-  loaded = await Promise.all(SOURCES.map((_, si) => loadSource(si)));
-  post({ type: 'ready' });
-  if (lastSearch) runSearch(lastSearch);
+/**
+ * The loaded index. Every search and request waits on it, so nothing reads a half-loaded index,
+ * and a failed load fails them all.
+ */
+const index = Promise.all(SOURCES.map((_, si) => loadSource(si)));
 
+index.then(async (all) => {
   // Descriptions are bigger and only refine ranking; fetch them after the first result set is out.
-  await Promise.all(loaded.map(loadDescriptions));
+  await Promise.all(all.map(loadDescriptions));
   // Descriptions refine matching and the rows' text: re-run the latest search under its own id,
   // so its fresh refs replace the current ones and the list re-reads its rows.
-  if (lastSearch) runSearch(lastSearch);
-}
+  if (lastSearch) runSearch(all, lastSearch);
+}, (e) => {
+  console.error('[psindex] index load failed', e);
+  post({ type: 'load-error', message: String(e?.message ?? e) });
+});
 
 function fuzzy(t: string, s: string): number {
   // Subsequence match; rewards contiguous runs. Returns 0 when not a subsequence.
@@ -143,12 +148,11 @@ function facetsFor(scope: Loaded[], perSource: boolean): Facets {
   };
 }
 
-function runSearch({ id, q, filters }: { id: number; q: string; filters: Filters }) {
-  if (!loaded) return;
+function runSearch(all: Loaded[], { id, q, filters }: Search) {
   const t0 = performance.now();
   const tokens = queryTokens(q);
   const { sources, perSourceFacets } = scopeOf(filters.source);
-  const scope = loaded.filter((L) => sources.some((s) => s.id === L.id));
+  const scope = all.filter((L) => sources.some((s) => s.id === L.id));
   const hits: { ref: number; score: number; len: number }[] = [];
   for (const L of scope) {
     for (let i = 0; i < L.shard.n.length; i++) {
@@ -167,8 +171,8 @@ function runSearch({ id, q, filters }: { id: number; q: string; filters: Filters
   post({ type: 'results', id, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0 }, [refs.buffer]);
 }
 
-function rowOf(ref: number): Row {
-  const [L, i] = decodeRef(ref);
+function rowOf(all: Loaded[], ref: number): Row {
+  const [L, i] = decodeRef(all, ref);
   const s = L.shard;
   return {
     key: keyOf(L, i),
@@ -190,9 +194,9 @@ function rowOf(ref: number): Row {
  * Resolve a link key: the row with that name and module, else the first row with that name
  * (an old unqualified link, or a module that no longer applies). Names match case-insensitively.
  */
-function refOfKey(key: string): number | null {
+function refOfKey(all: Loaded[], key: string): number | null {
   const { source, name, module } = parseKey(key);
-  const L = loaded!.find((x) => x.id === source);
+  const L = all.find((x) => x.id === source);
   if (!L) return null;
   const lower = name.toLowerCase();
   let first = -1;
@@ -204,43 +208,41 @@ function refOfKey(key: string): number | null {
   return first < 0 ? null : encodeRef(L, first);
 }
 
-function related(key: string): Row[] {
-  const ref = refOfKey(key);
+function related(all: Loaded[], key: string): Row[] {
+  const ref = refOfKey(all, key);
   if (ref === null) return [];
-  const [L, i] = decodeRef(ref);
+  const [L, i] = decodeRef(all, ref);
   const out: Row[] = [];
   const noun = L.lnoun[i];
   for (let j = 0; noun && j < L.shard.n.length && out.length < 30; j++) {
-    if (j !== i && L.lnoun[j] === noun) out.push(rowOf(encodeRef(L, j)));
+    if (j !== i && L.lnoun[j] === noun) out.push(rowOf(all, encodeRef(L, j)));
   }
   return out.sort((a, b) => a.verb.localeCompare(b.verb));
 }
 
 /** One handler per request; the compiler checks each reply against Requests in types.ts. */
-const handlers: { [K in RequestType]: (args: Requests[K]['args']) => Requests[K]['reply'] } = {
-  rows: ({ refs }) => refs.map(rowOf),
-  related: ({ key }) => related(key),
-  find: ({ key }) => {
-    const ref = refOfKey(key);
-    return ref === null ? null : rowOf(ref);
+const handlers: { [K in RequestType]: (all: Loaded[], args: Requests[K]['args']) => Requests[K]['reply'] } = {
+  rows: (all, { refs }) => refs.map((ref) => rowOf(all, ref)),
+  related: (all, { key }) => related(all, key),
+  find: (all, { key }) => {
+    const ref = refOfKey(all, key);
+    return ref === null ? null : rowOf(all, ref);
   },
 };
 
 /** Dispatch a request to its handler. TypeScript can't correlate m.type with m.args across the union, hence the one cast. */
-const answer = (m: Exclude<ToWorker, { type: 'search' }>) => handlers[m.type](m.args as never);
+const answer = (all: Loaded[], m: Exclude<ToWorker, { type: 'search' }>) => handlers[m.type](all, m.args as never);
 
-self.onmessage = (ev: MessageEvent<ToWorker>) => {
-  const m = ev.data;
+// Messages are handled in arrival order: each waits on the same `index` promise, whose callbacks run in order.
+self.onmessage = ({ data: m }: MessageEvent<ToWorker>) => {
   if (m.type === 'search') {
     lastSearch = m;
-    runSearch(m);
+    // Only the latest search is worth running; older ones that queued behind the load are dropped.
+    index.then((all) => { if (m === lastSearch) runSearch(all, m); }, () => {});
     return;
   }
-  // Requests only arrive after `ready` (the client waits for it), so `loaded` is set here.
-  post({ type: 'reply', id: m.id, reply: answer(m) });
+  index.then(
+    (all) => post({ type: 'reply', id: m.id, reply: answer(all, m) }),
+    () => post({ type: 'reply', id: m.id, error: 'index unavailable' }),
+  );
 };
-
-load().catch((e) => {
-  console.error('[psindex] index load failed', e);
-  post({ type: 'load-error', message: String(e?.message ?? e) });
-});

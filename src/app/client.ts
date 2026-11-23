@@ -1,7 +1,7 @@
 import { assetUrl } from './sources';
 import type { CmdletFile, Filters, FromWorker, RequestType, Requests, Results, ToWorker } from './types';
 
-type Reply = Requests[RequestType]['reply'];
+type Pending = { resolve: (reply: Requests[RequestType]['reply']) => void; reject: (e: Error) => void };
 
 interface Handlers {
   onResults: (r: Results) => void;
@@ -13,18 +13,19 @@ export class SearchClient {
   private worker = new Worker(new URL('./search.worker.ts', import.meta.url), { type: 'module' });
   private seq = 0;
   private latestSearch = 0;
-  private pending = new Map<number, (reply: Reply) => void>();
-  private ready: Promise<void>;
+  private pending = new Map<number, Pending>();
 
   constructor(h: Handlers) {
-    let markReady!: () => void;
-    this.ready = new Promise((r) => (markReady = r));
     this.worker.onmessage = ({ data: m }: MessageEvent<FromWorker>) => {
       switch (m.type) {
-        case 'ready': return markReady();
         case 'load-error': return h.onLoadError(m.message);
         case 'results': if (m.id === this.latestSearch) h.onResults(m); return;
-        case 'reply': this.pending.get(m.id)?.(m.reply); this.pending.delete(m.id); return;
+        case 'reply': {
+          const p = this.pending.get(m.id);
+          this.pending.delete(m.id);
+          if ('error' in m) p?.reject(new Error(m.error)); else p?.resolve(m.reply);
+          return;
+        }
       }
     };
   }
@@ -34,13 +35,12 @@ export class SearchClient {
     this.post({ type: 'search', id: this.latestSearch, q, filters });
   }
 
-  /** Ask the worker a question once its index has loaded. */
-  async request<K extends RequestType>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
-    await this.ready;
+  /** Ask the worker a question. It answers once its index has loaded, or rejects if the load failed. */
+  request<K extends RequestType>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
     const id = ++this.seq;
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       // The reply for `id` is Requests[K]['reply']; the map holds the union, so narrow here once.
-      this.pending.set(id, resolve as (reply: Reply) => void);
+      this.pending.set(id, { resolve: resolve as Pending['resolve'], reject });
       this.post({ type, id, args } as ToWorker);
     });
   }

@@ -58,6 +58,16 @@ jobs:
       - name: Refuse partial refreshes
         run: python3 scripts/check-shrink.py ${{ matrix.source }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The deploy builds the index from data/. Checking here, with the other sources as committed,
+      # means a source the build would reject uploads nothing and the rest still commit.
+      - name: Refuse data the index build rejects
+        run: npm ci && npm run index
+
       - uses: actions/upload-artifact@v4
         with:
           name: data-${{ matrix.source }}
@@ -85,15 +95,6 @@ jobs:
             rm -rf "data/$src" && mkdir -p "data/$src" && cp -r "$dir"/. "data/$src/"
             echo "applied $src"
           done
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      # The deploy builds the index from data/; refuse to commit anything it would reject.
-      - name: Check the refreshed data builds
-        run: npm ci && npm run index
 
       - name: Commit
         shell: bash

@@ -44,6 +44,20 @@ async function run(browser) {
   check(param(p, 'c') === 'graph:Get-MgUser', 'open entry is in the URL');
   check(moduleUrls.length > 0 && moduleUrls.every((u) => u.includes('?v=')), 'module files fetched at versioned URLs', moduleUrls[0]);
 
+  // Arrow keys move the cursor and Enter opens that row; a new search puts the cursor back on top.
+  {
+    await p.focus('input[type=search]');
+    await p.keyboard.press('ArrowDown');
+    await p.keyboard.press('ArrowDown');
+    const third = await p.textContent('.result.is-active .result-name');
+    await p.keyboard.press('Enter');
+    await p.waitForFunction((n) => document.querySelector('.detail-title code')?.textContent === n, third);
+    await p.fill('input[type=search]', 'get-azvm');
+    await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent === 'Get-AzVM');
+    const activeTop = await p.evaluate(() => document.querySelector('.result.is-active')?.style.top);
+    check(third && third !== 'Get-MgUser' && activeTop === '0px', 'keyboard cursor opens its row and resets per search', `${third}, active at ${activeTop}`);
+  }
+
   // Descriptions arriving late refresh the rows in place: the scroll position survives.
   {
     const c2 = await browser.newContext();

@@ -1,5 +1,5 @@
-import type { ComponentChildren } from 'preact';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren, Ref } from 'preact';
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { SearchClient } from './client';
 import { isWarnExtra, queryTokens, sourceOf, srcStyle } from './sources';
 import type { Row } from './types';
@@ -7,11 +7,16 @@ import type { Row } from './types';
 const ROW_H = 64;
 const OVERSCAN = 8;
 
+/** Keyboard navigation, driven from the search box. */
+export interface ListNav {
+  move: (delta: number) => void;
+  openActive: () => void;
+}
+
 interface Props {
+  navRef: Ref<ListNav>;
   client: SearchClient;
   refs: Int32Array | null;
-  active: number;
-  setActive: (i: number) => void;
   openKey: string;
   onOpen: (r: Row) => void;
   query: string;
@@ -21,10 +26,21 @@ interface Props {
 }
 
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, searchId, empty }: Props) {
+export function ResultList({ navRef, client, refs, openKey, onOpen, query, searchId, empty }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
+  // The keyboard cursor belongs to one result set: a new search id puts it back on the first row,
+  // a refresh under the same id keeps it.
+  const [cursor, setCursor] = useState({ id: searchId, i: 0 });
+  const active = cursor.id === searchId ? cursor.i : 0;
+  const setActive = (i: number) => setCursor({ id: searchId, i });
+
+  useImperativeHandle(navRef, () => ({
+    move: (delta) => { if (refs?.length) setActive(Math.max(0, Math.min(refs.length - 1, active + delta))); },
+    // The cursor is kept in view, so its row is normally materialised; if it is not yet, Enter does nothing.
+    openActive: () => { const row = refs?.length ? rows.get(refs[active]) : undefined; if (row) onOpen(row); },
+  }), [refs, rows, active, searchId, onOpen]);
 
   // A new search starts at the top; a refresh of the same search (descriptions arriving) keeps the user's place.
   useLayoutEffect(() => {

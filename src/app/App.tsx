@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { SearchClient } from './client';
 import { useAsciiField } from './ascii';
 import { useTheme } from './theme';
-import { ResultList, ResultsSkeleton } from './ResultList';
+import { ResultList, ResultsSkeleton, type ListNav } from './ResultList';
 import { Detail } from './Detail';
 import { Band, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
 import { ALL, formatCount, scopeOf } from './sources';
@@ -43,15 +43,15 @@ const activeFilters = (f: Filters) => (Object.keys(f) as (keyof Filters)[]).filt
 
 // ---- Search session ------------------------------------------------------------------------
 
+/** The detail pane's entry: a row, or a deep-linked key still being looked up (only ever the URL's). */
+type Selection = { row: Row } | { link: string } | null;
+
 function Search() {
   const [initial] = useState(readUrl);
   const [q, setQ] = useState(initial.q);
   const [filters, setFilters] = useState(initial.filters);
-  // The open entry, and a deep-linked key still being looked up (only ever the one from the URL).
-  const [open, setOpen] = useState<Row | null>(null);
-  const [link, setLink] = useState(initial.open);
+  const [sel, setSel] = useState<Selection>(initial.open ? { link: initial.open } : null);
   const [results, setResults] = useState<Results | null>(null);
-  const [active, setActive] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [client] = useState(() => new SearchClient({ onResults: setResults, onLoadError: setLoadError }));
@@ -59,15 +59,15 @@ function Search() {
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detailRef = useRef<HTMLElement>(null);
+  const listRef = useRef<ListNav>(null);
   const scope = scopeOf(filters.source);
   const { theme, toggle: toggleTheme } = useTheme();
   const pulse = useAsciiField(canvasRef, scope.color, theme);
   const refs = results?.refs ?? null;
 
   useEffect(() => client.search(q, filters), [q, filters]);
-  // A new result set starts with the cursor on its first row; a refresh of the same search keeps it.
-  useEffect(() => setActive(0), [results?.id]);
-
+  const open = sel && 'row' in sel ? sel.row : null;
+  const link = sel && 'link' in sel ? sel.link : '';
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
   const openKey = open?.key ?? link;
   useEffect(() => writeUrl({ q, filters, open: openKey }), [q, filters, openKey]);
@@ -75,8 +75,8 @@ function Search() {
   // Resolve the deep link. An old or unqualified key adopts the row's canonical key.
   useEffect(() => {
     if (!link) return;
-    let live = true; // opening or closing an entry clears `link` and supersedes this lookup
-    client.request('find', { key: link }).then((row) => { if (live) { setOpen(row); setLink(''); } });
+    let live = true; // opening or closing an entry replaces the selection and supersedes this lookup
+    client.request('find', { key: link }).then((row) => live && setSel(row && { row }));
     return () => { live = false; };
   }, [link]);
 
@@ -99,27 +99,22 @@ function Search() {
   const setSource = (source: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source, verb: f.verb, examples: f.examples }));
 
   const openRow = useCallback((row: Row) => {
-    setOpen(row);
-    setLink('');
+    setSel({ row });
     // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
     const pane = detailRef.current?.getBoundingClientRect();
     if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
   }, []);
-  const close = useCallback(() => { setOpen(null); setLink(''); }, []);
+  const close = useCallback(() => setSel(null), []);
 
-  const onKeyDown = async (e: KeyboardEvent) => {
+  const onKeyDown = (e: KeyboardEvent) => {
     // The box is autofocused, so the "/" shortcut lands here; nobody searches for a leading slash.
     if (e.key === '/' && !(e.target as HTMLInputElement).value) { e.preventDefault(); return; }
     if (e.key === 'Escape') { if (openKey) close(); else if (q) setQ(''); return; }
-    if (!refs?.length) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(refs.length - 1, a + 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
-    else if (e.key === 'Enter') {
-      e.preventDefault();
-      // Refs are stable across result sets, so this is the row under the cursor even if new results land meanwhile.
-      const [row] = await client.request('rows', { refs: [refs[active]] });
-      openRow(row);
-    }
+    const nav = listRef.current;
+    if (!nav) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); nav.move(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); nav.move(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); nav.openActive(); }
   };
 
   const filterCount = activeFilters(filters);
@@ -163,10 +158,9 @@ function Search() {
       results={
         loadError ? <div class="results results-empty"><LoadFailed message={loadError} /></div> : (
           <ResultList
+            navRef={listRef}
             client={client}
             refs={refs}
-            active={active}
-            setActive={setActive}
             openKey={openKey}
             onOpen={openRow}
             query={q}

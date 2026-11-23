@@ -95,7 +95,7 @@ export type ToWorker =
   | { [K in RequestType]: { type: K; id: number; args: Requests[K]['args'] } }[RequestType];
 
 export type FromWorker =
-  | { type: 'ready' }
   | { type: 'load-error'; message: string }
   | ({ type: 'results' } & Results)
-  | { type: 'reply'; id: number; reply: Requests[RequestType]['reply'] };
+  | { type: 'reply'; id: number; reply: Requests[RequestType]['reply'] }
+  | { type: 'reply'; id: number; error: string };
