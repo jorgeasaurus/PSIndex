@@ -1,5 +1,5 @@
 import { artifactPath } from './artifacts';
-import { assetUrl } from './sources';
+import { fetchAsset } from './sources';
 import type { CmdletFile, Filters, FromWorker, RequestType, Requests, Results, ToWorker } from './types';
 
 type Reply = Requests[RequestType]['reply'];
@@ -61,10 +61,7 @@ export function loadModule(source: string, file: string): Promise<CmdletFile> {
   const key = `${source}/${file}`;
   let p = moduleCache.get(key);
   if (!p) {
-    p = fetch(assetUrl(artifactPath.module(source, file))).then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    });
+    p = fetchAsset<CmdletFile>(artifactPath.module(source, file));
     p.catch(() => moduleCache.delete(key));
     moduleCache.set(key, p);
   }

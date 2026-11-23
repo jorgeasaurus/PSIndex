@@ -1,5 +1,5 @@
 // The layout of the build artifacts under /a/<build>/: the one place their paths are spelled.
-// scripts/build-index.ts writes them; the worker and the client read them through sources.ts assetUrl,
+// scripts/build-index.ts writes them; the worker and the client read them through sources.ts fetchAsset,
 // which URL-encodes each segment (these are file-system paths).
 export const artifactPath = {
   /** Columnar search index of one source, loaded first. */
