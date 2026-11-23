@@ -86,6 +86,15 @@ jobs:
             echo "applied $src"
           done
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The deploy builds the index from data/; refuse to commit anything it would reject.
+      - name: Check the refreshed data builds
+        run: npm ci && npm run index
+
       - name: Commit
         shell: bash
         run: |

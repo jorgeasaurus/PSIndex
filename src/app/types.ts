@@ -79,7 +79,8 @@ export interface Facets {
   extras: string[];
 }
 
-export interface Results { refs: Int32Array; facets: Facets; ms: number }
+/** One search's answer; `id` is the search's, so a re-run of the same search keeps it. */
+export interface Results { id: number; refs: Int32Array; facets: Facets; ms: number }
 
 /** Request/reply pairs answered by the worker. */
 export interface Requests {
@@ -96,5 +97,5 @@ export type ToWorker =
 export type FromWorker =
   | { type: 'ready' }
   | { type: 'load-error'; message: string }
-  | ({ type: 'results'; id: number } & Results)
+  | ({ type: 'results' } & Results)
   | { type: 'reply'; id: number; reply: Requests[RequestType]['reply'] };

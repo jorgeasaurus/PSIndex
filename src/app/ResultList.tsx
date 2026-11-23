@@ -15,13 +15,13 @@ interface Props {
   openKey: string;
   onOpen: (r: Row) => void;
   query: string;
-  /** Changes when the user changes the search (query or filters); the list scrolls back to the top. */
-  searchKey: string;
+  /** Id of the search `refs` answer; a new id scrolls back to the top, a refresh under the same id keeps the place. */
+  searchId: number;
   empty: ComponentChildren;
 }
 
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, searchKey, empty }: Props) {
+export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, searchId, empty }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
@@ -30,7 +30,7 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, q
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
     measure();
-  }, [searchKey]);
+  }, [searchId]);
 
   const measure = () => {
     const el = scroller.current;

@@ -5,6 +5,7 @@ import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
 import { isCommonParam, parseSyntax, tokenize, withDocumented } from './powershell';
 import { isWarnExtra, sourceOf, srcStyle } from './sources';
+import { entryUrl } from './url';
 import type { CmdletDetail, CmdletFile, Row } from './types';
 
 interface Props {
@@ -45,7 +46,7 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
         </div>
         <div class="detail-links">
           <a class="btn" href={learnUrl(row)} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} /></a>
-          <CopyTextButton text={shareUrl(row)} label="Copy link" icon={<Link2 size={14} />} />
+          <CopyTextButton text={entryUrl(row.key)} label="Copy link" icon={<Link2 size={14} />} />
         </div>
       </div>
 
@@ -176,8 +177,3 @@ const showsCategory = (row: Row) => !!row.category && row.category !== row.modul
 
 const learnUrl = (row: Row) => `https://learn.microsoft.com/powershell/module/${row.module.toLowerCase()}/${row.name.toLowerCase()}`;
 
-function shareUrl(row: Row) {
-  const u = new URL(location.origin + location.pathname);
-  u.searchParams.set('c', row.key);
-  return u.toString();
-}
