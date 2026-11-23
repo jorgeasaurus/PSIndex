@@ -207,6 +207,7 @@ function Search() {
             openKey={open.key}
             onOpen={openRow}
             query={q}
+            searchKey={JSON.stringify([q, filters])}
             empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => setFilters(EMPTY_FILTERS)} />}
           />
         )

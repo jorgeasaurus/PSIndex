@@ -13,11 +13,10 @@ export function readTheme(): Theme | null {
   }
 }
 
-/** Store (or clear) the override and apply it to <html data-theme>. */
-export function writeTheme(theme: Theme | null) {
-  const root = document.documentElement;
-  if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
-  try { theme ? localStorage.setItem(THEME_KEY, theme) : localStorage.removeItem(THEME_KEY); } catch {}
+/** Store the override and apply it to <html data-theme>. */
+export function writeTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem(THEME_KEY, theme); } catch {}
 }
 
 /** The theme actually shown: the override, else the OS preference. */

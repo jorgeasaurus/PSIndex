@@ -17,7 +17,7 @@ export class SearchClient {
   private pending = new Map<number, (reply: unknown) => void>();
   private ready: Promise<void>;
   private rowCache = new Map<number, Row>();
-  private rowListeners = new Set<() => void>();
+  private lastQuery: { q: string; filters: Filters } | null = null;
 
   constructor(h: Handlers) {
     let markReady!: () => void;
@@ -34,6 +34,7 @@ export class SearchClient {
   }
 
   search(q: string, filters: Filters) {
+    this.lastQuery = { q, filters };
     this.latestSearch = ++this.seq;
     this.post({ type: 'search', id: this.latestSearch, q, filters });
   }
@@ -54,15 +55,13 @@ export class SearchClient {
     return refs.map((ref) => found.get(ref)!);
   }
 
-  /** Called when cached rows go stale (descriptions arrived); returns an unsubscribe function. */
-  onRowsChanged(listener: () => void) {
-    this.rowListeners.add(listener);
-    return () => { this.rowListeners.delete(listener); };
-  }
-
+  /**
+   * Descriptions refine both matching and the rows' text, so cached rows are stale and the
+   * latest search is re-run: its fresh results re-render the list through onResults.
+   */
   private descriptionsArrived() {
     this.rowCache.clear();
-    this.rowListeners.forEach((l) => l());
+    if (this.lastQuery) this.search(this.lastQuery.q, this.lastQuery.filters);
   }
 
   /** Ask the worker a question once its index has loaded. Rows go through `rows()` and its cache. */

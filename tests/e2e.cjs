@@ -44,6 +44,25 @@ async function run(browser) {
   check(param(p, 'c') === 'graph:Get-MgUser', 'open entry is in the URL');
   check(moduleUrls.length > 0 && moduleUrls.every((u) => u.includes('?v=')), 'module files fetched at versioned URLs', moduleUrls[0]);
 
+  // Descriptions arriving late refresh the rows in place: the scroll position survives.
+  {
+    const c2 = await browser.newContext();
+    let release;
+    const gate = new Promise((r) => (release = r));
+    await c2.route('**/idx/graph.desc.json*', async (r) => { await gate; r.continue(); });
+    const p2 = await c2.newPage();
+    await p2.goto(`${BASE}/?s=graph&q=mguser`);
+    await p2.waitForFunction(() => document.querySelectorAll('.result:not(.result-skel)').length > 5);
+    await p2.evaluate(() => (document.querySelector('.results').scrollTop = 6400));
+    const descArrived = p2.waitForResponse(/graph\.desc\.json/);
+    release();
+    await descArrived;
+    await p2.waitForFunction(() => [...document.querySelectorAll('.result .result-desc')].some((d) => d.textContent && !d.querySelector('.result-module')));
+    const top = await p2.evaluate(() => document.querySelector('.results').scrollTop);
+    check(top >= 6000, 'late descriptions keep the scroll position', `scrollTop ${top}`);
+    await c2.close();
+  }
+
   // The theme toggle applies and remembers an explicit theme.
   const before = await p.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   await p.click('button[aria-label="Toggle light or dark theme"]');
@@ -62,9 +81,11 @@ async function run(browser) {
   check(metas.length === 2 && metas[0] !== metas[1] && metas.every(Boolean), 'duplicate rows are labelled by module', metas.join(' / '));
   const opened = [];
   for (let i = 0; i < 2; i++) {
+    const before = param(p, 'c');
     await p.click(`.result >> nth=${i}`);
-    await p.waitForSelector('.detail .code');
-    opened.push(new URL(p.url()).searchParams.get('c'));
+    // The pane may already show the previous entry; wait for this click's key to reach the URL.
+    await p.waitForFunction((prev) => { const c = new URLSearchParams(location.search).get('c'); return c && c !== prev; }, before);
+    opened.push(param(p, 'c'));
   }
   check(opened[0] !== opened[1] && opened.every((k) => k.includes('@')), 'each duplicate has its own key', opened.join(' | '));
   await p.goto(`${BASE}/?c=${encodeURIComponent(opened[1])}`);

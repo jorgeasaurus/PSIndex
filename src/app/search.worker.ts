@@ -75,8 +75,7 @@ async function load() {
 
   // Descriptions are bigger and only refine ranking; fetch them after the first result set is out.
   await Promise.all(loaded.map(loadDescriptions));
-  post({ type: 'desc-ready' });
-  if (lastSearch?.q.trim()) runSearch(lastSearch);
+  post({ type: 'desc-ready' }); // the client re-runs its latest search
 }
 
 function fuzzy(t: string, s: string): number {

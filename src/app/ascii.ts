@@ -8,6 +8,7 @@ import type { Theme } from './theme';
 
 const RAMP = ' .·:-=+*%#@';
 const SIGILS = '$|{}<>;'; // PowerShell punctuation sprinkled into the densest cells
+const QUIET = '[data-quiet]'; // elements the field steps back from, so text over it stays clean
 
 interface Ripple { x: number; y: number; t0: number; amp: number }
 
@@ -33,8 +34,7 @@ export class AsciiField {
   private quiet: DOMRect[] = [];
   private listeners = new AbortController();
 
-  /** `quietSelector` marks elements the field steps back from, so text over it stays clean. */
-  constructor(private canvas: HTMLCanvasElement, private quietSelector = '[data-quiet]') {
+  constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d', { alpha: true })!;
     this.atlas = document.createElement('canvas');
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -95,7 +95,7 @@ export class AsciiField {
     this.cell = narrow ? 12 : 14;
     this.qpad = narrow ? 6 : 18;
     this.headerFade = Math.min(1, (narrow ? 520 : 420) / Math.max(1, h));
-    this.quiet = [...document.querySelectorAll(this.quietSelector)].map((el) => el.getBoundingClientRect());
+    this.quiet = [...document.querySelectorAll(QUIET)].map((el) => el.getBoundingClientRect());
     c.width = Math.round(w * this.dpr);
     c.height = Math.round(h * this.dpr);
     c.style.width = w + 'px';
@@ -192,7 +192,7 @@ function scaleHex(hex: string, k: number) {
 
 /**
  * Run the field on `canvas` for the component's lifetime, tinted with `color` for `theme`.
- * Returns `pulseAt(rect)`, which sends a ripple from the given box's left/centre.
+ * Returns `pulse(point, amp?)`, which sends a ripple out from a screen point.
  */
 export function useAsciiField(canvas: RefObject<HTMLCanvasElement | null>, color: string, theme: Theme) {
   const field = useRef<AsciiField | null>(null);

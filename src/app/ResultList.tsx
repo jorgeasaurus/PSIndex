@@ -15,23 +15,22 @@ interface Props {
   openKey: string;
   onOpen: (r: Row) => void;
   query: string;
+  /** Changes when the user changes the search (query or filters); the list scrolls back to the top. */
+  searchKey: string;
   empty: ComponentChildren;
 }
 
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, empty }: Props) {
+export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, searchKey, empty }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
-  const [rowsVersion, setRowsVersion] = useState(0); // bumps when the client's cached rows go stale
 
-  // New result set: jump to top, drop cache.
+  // A new search starts at the top; a refresh of the same search (descriptions arriving) keeps the user's place.
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
     measure();
-  }, [refs]);
-
-  useEffect(() => client.onRowsChanged(() => setRowsVersion((v) => v + 1)), [client]);
+  }, [searchKey]);
 
   const measure = () => {
     const el = scroller.current;
@@ -56,7 +55,7 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, q
     let live = true;
     client.rows(window).then((got) => live && setRows(new Map(got.map((r, k) => [window[k], r]))));
     return () => { live = false; };
-  }, [client, refs, range, rowsVersion]);
+  }, [client, refs, range]);
 
   // Keep the keyboard cursor in view.
   useEffect(() => {
