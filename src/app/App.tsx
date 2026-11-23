@@ -62,9 +62,10 @@ export default function App({ sources, total }: Props) {
   const [showFilters, setShowFilters] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | null>(null);
   const [booted, setBooted] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
-  const client = useRef<SearchClient>();
-  const field = useRef<AsciiField>();
+  const client = useRef<SearchClient | undefined>(undefined);
+  const field = useRef<AsciiField | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -78,6 +79,7 @@ export default function App({ sources, total }: Props) {
     client.current = c;
     c.onResults = (r) => { setRefs(r.refs); setFacets(r.facets); setMs(r.ms); };
     c.onDesc = () => setDescTick((t) => t + 1);
+    c.onLoadError = (msg) => setLoadError(msg);
     setBooted(true);
     if (canvasRef.current) {
       const f = new AsciiField({ canvas: canvasRef.current });
@@ -150,7 +152,12 @@ export default function App({ sources, total }: Props) {
   };
 
   const setFilter = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }));
-  const setSource = (s: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source: s, examples: f.examples, verb: f.verb }));
+  // Verb and "has examples" carry across cmdlet sources, but mean nothing for error codes.
+  const setSource = (s: Filters['source']) =>
+    setFilters((f) => {
+      const keep = s !== 'errors' && f.source !== 'errors';
+      return { ...EMPTY_FILTERS, source: s, examples: keep && f.examples, verb: keep ? f.verb : '' };
+    });
 
   const open = useCallback((row: Row) => {
     setOpenRow(row);
@@ -182,7 +189,7 @@ export default function App({ sources, total }: Props) {
     ? srcMeta.kind === 'error' ? 'Search error codes or messages: AADSTS50126, 0x80240017…' : `Search ${fmt.format(srcMeta.count)} ${srcMeta.short} cmdlets`
     : `Search ${fmt.format(total)} cmdlets & errors`;
 
-  const resultsLabel = refs == null ? 'Loading index…' : `${fmt.format(refs.length)} ${refs.length === 1 ? 'result' : 'results'}`;
+  const resultsLabel = loadError ? 'Index unavailable' : refs == null ? 'Loading index…' : `${fmt.format(refs.length)} ${refs.length === 1 ? 'result' : 'results'}`;
   const toggleTheme = () => {
     const dark = theme ? theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
     setTheme(dark ? 'light' : 'dark');
@@ -263,6 +270,13 @@ export default function App({ sources, total }: Props) {
             descTick={descTick}
             query={q}
             empty={<EmptyState q={q} filters={filters} sourceLabel={srcMeta?.short} reset={() => setFilters(EMPTY_FILTERS)} />}
+            failed={loadError ? (
+              <div class="empty" role="alert">
+                <p class="empty-title">The search index didn’t load.</p>
+                <p>{loadError}. Check your connection, then reload the page.</p>
+                <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
+              </div>
+            ) : null}
           />
         </section>
 

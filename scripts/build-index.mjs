@@ -47,7 +47,8 @@ async function buildCmdletSource(src) {
   const manifest = await readJson(join(dir, 'manifest.json'));
   const descriptions = await readJson(join(dir, 'descriptions.json')).catch(() => ({}));
 
-  // Map every cmdlet to the detail file that holds it (file layout differs per pipeline).
+  // Map every cmdlet to the detail file(s) that hold it. A name can live in several files
+  // (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
   const fileOf = new Map();
   const modDir = join(dir, 'modules');
   await mkdir(join(OUT_DATA, src.id), { recursive: true });
@@ -55,7 +56,8 @@ async function buildCmdletSource(src) {
     const stem = basename(f, '.json');
     const body = await readJson(join(modDir, f));
     for (const [name, c] of Object.entries(body.cmdlets ?? {})) {
-      fileOf.set(name, stem);
+      if (!fileOf.has(name)) fileOf.set(name, []);
+      fileOf.get(name).push(stem);
       if (descriptions[name] && !c.description) c.description = descriptions[name];
     }
     await writeFile(join(OUT_DATA, src.id, f), JSON.stringify(body));
@@ -70,7 +72,9 @@ async function buildCmdletSource(src) {
     idx.v.push(verbs.id(r.v));
     idx.m.push(mods.id(r.m ?? ''));
     idx.c.push(cats.id(r.c ?? ''));
-    idx.f.push(files.id(fileOf.get(r.n) ?? ''));
+    // Prefer the file named after the row's own module; fall back to the only/first holder.
+    const holders = (fileOf.get(r.n) ?? []).sort();
+    idx.f.push(files.id(holders.includes(r.m) ? r.m : holders[0] ?? ''));
     // x: api version (graph/entra) or site role (mecm)
     idx.x.push(extra.id(r.a ?? r.r ?? ''));
     idx.p.push(r.p ?? 0);
@@ -131,7 +135,9 @@ async function main() {
     console.log(`  ${src.id.padEnd(9)} ${String(built.meta.count).padStart(6)} entries`);
   }
   const total = sources.reduce((a, s) => a + s.count, 0);
-  await writeFile(join(OUT_IDX, 'sources.json'), JSON.stringify({ built: new Date().toISOString(), total, sources }));
+  // Shards are fetched as /idx/<id>.json?v=<build>, so an index and its descriptions always come from the same build.
+  const build = Date.now().toString(36);
+  await writeFile(join(OUT_IDX, 'sources.json'), JSON.stringify({ build, total, sources }));
   await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ total, sources }, null, 2) + '\n');
   console.log(`  ${total} entries indexed in ${Date.now() - t0} ms`);
 }

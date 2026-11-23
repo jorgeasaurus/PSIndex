@@ -39,7 +39,7 @@ export class AsciiField {
     this.resize = this.resize.bind(this);
     this.frame = this.frame.bind(this);
     addEventListener('resize', this.resize, { passive: true });
-    addEventListener('pointermove', (e) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; }, { passive: true });
+    addEventListener('pointermove', (e: PointerEvent) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; }, { passive: true });
     document.addEventListener('visibilitychange', () => (document.hidden ? this.stop() : this.start()));
     matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
       this.reduced = e.matches;

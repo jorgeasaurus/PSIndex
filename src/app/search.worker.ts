@@ -11,6 +11,7 @@ interface Loaded {
   lname: string[];
   lflat: string[]; // name without hyphens, so "getmguser" finds Get-MgUser
   lnoun: string[];
+  keys: string[]; // stable row identity; disambiguated by module when a name repeats in a source
   ldesc: string[] | null;
   desc: string[] | null;
   isError: boolean;
@@ -23,11 +24,19 @@ const post = (m: FromWorker, transfer: Transferable[] = []) => (self as Dedicate
 
 const normCode = (s: string) => s.toLowerCase().replace(/^0x/, '').replace(/^-/, '');
 
+async function getJson<T>(url: URL, init?: RequestInit): Promise<T> {
+  const r = await fetch(url, init);
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url.pathname}`);
+  return r.json();
+}
+
 async function load() {
   const base = new URL('/idx/', self.location.origin);
+  const { build } = await getJson<{ build: string }>(new URL('sources.json', base), { cache: 'no-cache' });
+  const shardUrl = (file: string) => { const u = new URL(file, base); u.searchParams.set('v', build); return u; };
   await Promise.all(
     ORDER.map(async (id, si) => {
-      const shard: IndexShard = await (await fetch(new URL(`${id}.json`, base))).json();
+      const shard = await getJson<IndexShard>(shardUrl(`${id}.json`));
       const isError = id === 'errors';
       const lname = shard.n.map((n) => (isError ? normCode(n) : n.toLowerCase()));
       const lnoun = shard.n.map((n) => {
@@ -35,7 +44,10 @@ async function load() {
         return i > 0 ? n.slice(i + 1).toLowerCase() : '';
       });
       const lflat = lname.map((n) => n.replace(/-/g, ''));
-      loaded[si] = { id, si, shard, lname, lflat, lnoun, ldesc: null, desc: null, isError };
+      const seen = new Map<string, number>();
+      for (const n of shard.n) seen.set(n, (seen.get(n) ?? 0) + 1);
+      const keys = shard.n.map((n, i) => (seen.get(n)! > 1 ? `${id}:${n}@${shard.mods[shard.m[i]]}` : `${id}:${n}`));
+      loaded[si] = { id, si, shard, lname, lflat, lnoun, keys, ldesc: null, desc: null, isError };
     }),
   );
   post({ type: 'ready', sources: ORDER });
@@ -45,7 +57,8 @@ async function load() {
   await Promise.all(
     loaded.map(async (L) => {
       if (!L) return;
-      const desc: string[] = await (await fetch(new URL(`${L.id}.desc.json`, base))).json();
+      const desc = await getJson<string[]>(shardUrl(`${L.id}.desc.json`)).catch(() => null);
+      if (!desc || desc.length !== L.shard.n.length) return; // never pair mismatched shards
       L.desc = desc;
       L.ldesc = desc.map((d) => d.toLowerCase());
     }),
@@ -153,7 +166,7 @@ function rowOf(ref: number): Row {
   const i = ref & ((1 << SHIFT) - 1);
   const s = L.shard;
   return {
-    key: `${L.id}:${s.n[i]}`,
+    key: L.keys[i],
     source: L.id,
     name: s.n[i],
     verb: s.verbs[s.v[i]],
@@ -170,9 +183,11 @@ function rowOf(ref: number): Row {
 function refOfKey(key: string): number {
   const c = key.indexOf(':');
   const id = key.slice(0, c) as SourceId;
-  const name = key.slice(c + 1);
   const L = loaded.find((x) => x?.id === id);
   if (!L) return -1;
+  const exact = L.keys.indexOf(key);
+  if (exact >= 0) return (L.si << SHIFT) | exact;
+  const name = key.slice(c + 1).split('@')[0]; // old link, or a module qualifier that no longer applies
   const i = L.shard.n.indexOf(name);
   if (i < 0) {
     const j = L.shard.n.findIndex((n) => n.toLowerCase() === name.toLowerCase());
@@ -224,4 +239,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
   }
 };
 
-load().catch((e) => console.error('[psindex] index load failed', e));
+load().catch((e) => {
+  console.error('[psindex] index load failed', e);
+  post({ type: 'load-error', message: String(e?.message ?? e) });
+});

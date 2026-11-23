@@ -66,6 +66,7 @@ export type ToWorker =
 
 export type FromWorker =
   | { type: 'ready'; sources: SourceId[] }
+  | { type: 'load-error'; message: string }
   | { type: 'desc-ready' }
   | { type: 'results'; id: number; refs: Int32Array; total: number; facets: Facets; ms: number }
   | { type: 'rows'; id: number; rows: Row[] }

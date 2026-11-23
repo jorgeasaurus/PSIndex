@@ -17,10 +17,11 @@ interface Props {
   descTick: number;
   query: string;
   empty: ComponentChildren;
+  failed?: ComponentChildren;
 }
 
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ client, refs, active, setActive, openKey, onOpen, descTick, query, empty }: Props) {
+export function ResultList({ client, refs, active, setActive, openKey, onOpen, descTick, query, empty, failed }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
@@ -68,8 +69,9 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, d
     let live = true;
     client.rows(want).then((got) => {
       if (!live) return;
+      // Evict before inserting, so the rows about to be shown are never the ones dropped.
+      if (cache.current.size + got.length > 4000) cache.current.clear();
       got.forEach((r, k) => cache.current.set(want[k], r));
-      if (cache.current.size > 4000) cache.current.clear();
       publish();
     });
     return () => { live = false; };
@@ -84,6 +86,7 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, d
     else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
   }, [active]);
 
+  if (failed) return <div class="results results-empty">{failed}</div>;
   if (refs && refs.length === 0) return <div class="results results-empty">{empty}</div>;
 
   const items = [];

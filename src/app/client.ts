@@ -10,6 +10,7 @@ export class SearchClient {
   private latestSearch = 0;
   ready: Promise<void>;
   onDesc: () => void = () => {};
+  onLoadError: (message: string) => void = () => {};
   onResults: (r: { refs: Int32Array; total: number; facets: Facets; ms: number }) => void = () => {};
 
   constructor() {
@@ -20,6 +21,7 @@ export class SearchClient {
       const m = ev.data;
       if (m.type === 'ready') return resolveReady();
       if (m.type === 'desc-ready') return this.onDesc();
+      if (m.type === 'load-error') return this.onLoadError(m.message);
       if (m.type === 'results') {
         if (m.id === this.latestSearch) this.onResults(m);
         return;
