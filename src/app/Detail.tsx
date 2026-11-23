@@ -67,7 +67,7 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
   );
 }
 
-type EntryState = { status: 'loading' } | { status: 'missing' } | { status: 'failed'; message: string } | { status: 'ok'; cmdlet: CmdletDetail };
+type EntryState = { status: 'loading' } | { status: 'failed'; message: string } | { status: 'ok'; cmdlet: CmdletDetail };
 
 /** Loads the row's module file and renders its entry, or the loading / error state. */
 function CmdletEntry({ row }: { row: Row }) {
@@ -76,8 +76,11 @@ function CmdletEntry({ row }: { row: Row }) {
     let live = true;
     loadModule(row.source, row.file)
       .then((file: CmdletFile) => {
+        // The build writes a row's file from the entries that hold its name, so a miss means the
+        // index and the file come from different deploys: report it like any failed load.
         const cmdlet = file[row.name];
-        if (live) setState(cmdlet ? { status: 'ok', cmdlet } : { status: 'missing' });
+        if (!cmdlet) throw new Error(`no record for ${row.name}`);
+        if (live) setState({ status: 'ok', cmdlet });
       })
       .catch((e) => live && setState({ status: 'failed', message: e.message }));
     return () => { live = false; };
@@ -85,7 +88,6 @@ function CmdletEntry({ row }: { row: Row }) {
 
   switch (state.status) {
     case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
-    case 'missing': return <p class="notice notice-error" role="alert">This cmdlet is in the index but its module file has no record for it.</p>;
     case 'failed': return <p class="notice notice-error" role="alert">Couldn’t load details ({state.message}). Check your connection and pick the cmdlet again.</p>;
     case 'ok': return <CmdletBody c={state.cmdlet} />;
   }

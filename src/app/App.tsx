@@ -7,7 +7,7 @@ import { ResultList, ResultsSkeleton, type ListNav } from './ResultList';
 import { Detail } from './Detail';
 import { Band, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
 import { ALL, formatCount, scopeOf } from './sources';
-import { EMPTY_FILTERS, readUrl, writeUrl } from './url';
+import { EMPTY_FILTERS, activeFilters, readUrl, writeUrl } from './url';
 import type { Facets, Filters, Results, Row } from './types';
 
 /**
@@ -38,8 +38,6 @@ function Shell() {
 
 const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] };
 
-/** Filters narrowing the results within the chosen source (the source itself is shown by the tabs). */
-const activeFilters = (f: Filters) => (Object.keys(f) as (keyof Filters)[]).filter((k) => k !== 'source' && f[k] !== EMPTY_FILTERS[k]).length;
 
 // ---- Search session ------------------------------------------------------------------------
 

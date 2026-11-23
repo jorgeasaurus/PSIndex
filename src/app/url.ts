@@ -34,6 +34,9 @@ function filtersFrom(p: URLSearchParams): Filters {
 /** The filters of a URL that sets none: every source, nothing narrowed. */
 export const EMPTY_FILTERS = filtersFrom(new URLSearchParams());
 
+/** Filters narrowing the results within the chosen source (the source itself is shown by the tabs). */
+export const activeFilters = (f: Filters) => FILTER_KEYS.filter((k) => k !== 'source' && f[k] !== EMPTY_FILTERS[k]).length;
+
 export interface UrlState { q: string; filters: Filters; open: string }
 
 export function readUrl(): UrlState {
