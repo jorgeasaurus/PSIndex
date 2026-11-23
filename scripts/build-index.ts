@@ -18,7 +18,10 @@ const DESC_MAX = 220;
 interface SourceDef extends Pick<SourceMeta, 'id' | 'label' | 'short' | 'color' | 'sample'> {
   /** An optional per-cmdlet facet: `field` is its key in the manifest rows, `warn` a value shown as a caution. */
   extra: { label: string; field: string; warn?: string } | null;
-  /** For a pipeline whose rows carry no module (MECM is one module), the module of every row. */
+  /**
+   * For a pipeline whose rows carry no module, the module of every row. Its files are not named
+   * after that module (MECM's are per category), so a row's file is the one file holding its name.
+   */
   module?: string;
 }
 
@@ -34,15 +37,14 @@ const SOURCES: SourceDef[] = [
 // ---- Pipeline output (data/<source>/), as the parsers write it -----------------------------
 
 // Read as unknown and checked field by field: a parser change that breaks the shape fails the build.
-interface Manifest { v: unknown; d: unknown }
-interface RawCmdlet { syntax?: unknown; examples?: unknown; permissions?: unknown; parameters?: unknown }
 type RawParam = { name: string; type: string; required: boolean; description?: string };
-interface RawModuleFile { cmdlets: unknown }
 
 /** One index row, before it is split into columns. */
 interface Row { n: string; v: string; m: string; c: string; f: string; x: string; p: number; e: boolean; desc: string }
 
-const readJson = async <T>(p: string): Promise<T> => JSON.parse(await readFile(p, 'utf8'));
+const readJson = async (p: string): Promise<unknown> => JSON.parse(await readFile(p, 'utf8'));
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isStringRecord = (v: unknown): v is Record<string, string> => isObject(v) && Object.values(v).every((x) => typeof x === 'string');
 const clip = (s: string) => {
   s = s.replace(/\s+/g, ' ').trim();
   return s.length > DESC_MAX ? s.slice(0, DESC_MAX - 1).trimEnd() + '…' : s;
@@ -50,12 +52,12 @@ const clip = (s: string) => {
 
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) =>
-  typeof x?.name === 'string' && typeof x.type === 'string' && typeof x.required === 'boolean' && (x.description === undefined || typeof x.description === 'string'));
+  isObject(x) && typeof x.name === 'string' && typeof x.type === 'string' && typeof x.required === 'boolean' && (x.description === undefined || typeof x.description === 'string'));
 
 /** The detail shape the app reads: every field present, so the UI never guesses. */
 function normalizeCmdlet(where: string, raw: unknown, description: string): CmdletDetail {
-  if (typeof raw !== 'object' || raw === null) throw new Error(`${where}: not an object`);
-  const c: RawCmdlet = raw; // an object whose fields are all checked below
+  if (!isObject(raw)) throw new Error(`${where}: not an object`);
+  const c = raw;
   if (typeof c.syntax !== 'string') throw new Error(`${where}: syntax is not a string`);
   if (!strings(c.examples)) throw new Error(`${where}: examples is not a list of strings`);
   if (c.permissions !== undefined && !strings(c.permissions)) throw new Error(`${where}: permissions is not a list of strings`);
@@ -76,8 +78,8 @@ function normalizeCmdlet(where: string, raw: unknown, description: string): Cmdl
  * read off that file's normalized entry, so the index and the detail pane cannot disagree.
  */
 function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, Map<string, CmdletDetail>>, descriptions: Record<string, string>): Row {
-  if (typeof raw !== 'object' || raw === null) throw new Error(`${src.id} manifest: a row is not an object`);
-  const r = raw as Record<string, unknown>; // an object; each field is checked below
+  if (!isObject(raw)) throw new Error(`${src.id} manifest: a row is not an object`);
+  const r = raw;
   const name = typeof r.n === 'string' ? r.n : '';
   const fail = (what: string): never => { throw new Error(`${src.id} manifest, ${name || JSON.stringify(raw)}: ${what}`); };
   const str = (k: string) => { const v = r[k]; return typeof v === 'string' ? v : fail(`${k} is not a string`); };
@@ -87,7 +89,8 @@ function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, Map
   const held = holders.get(name) ?? new Map<string, CmdletDetail>();
   const files = [...held.keys()].sort();
   if (!files.length) fail('no module file');
-  const f = files.includes(m) ? m : files[0]; // prefer the file named after the row's own module
+  // The file named after the row's module; for a one-module source, the one file holding the name.
+  const f = files.includes(m) ? m : src.module && files.length === 1 ? files[0] : fail(`module ${m} matches none of its files (${files.join(', ')})`);
   const detail = held.get(f)!;
   return {
     n: name, v: str('v'), c: str('c'), m, f,
@@ -101,14 +104,16 @@ function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, Map
 /** Write a source's normalized module files to public/data/<source>/ and return its rows, sorted by name. */
 async function loadRows(src: SourceDef, out: string): Promise<{ version: string; rows: Row[] }> {
   const dir = join(DATA, src.id);
-  const manifest = await readJson<Manifest>(join(dir, 'manifest.json'));
-  const descriptions = await readJson<Record<string, string>>(join(dir, 'descriptions.json'));
+  const manifest = await readJson(join(dir, 'manifest.json'));
+  if (!isObject(manifest)) throw new Error(`${src.id} manifest: not an object`);
+  const descriptions = await readJson(join(dir, 'descriptions.json'));
+  if (!isStringRecord(descriptions)) throw new Error(`${src.id} descriptions: not an object of strings`);
   // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
   const holders = new Map<string, Map<string, CmdletDetail>>(); // name -> module file -> entry
   for (const f of (await readdir(join(dir, 'modules'))).filter((f) => f.endsWith('.json'))) {
     const stem = basename(f, '.json');
-    const raw = await readJson<RawModuleFile>(join(dir, 'modules', f));
-    if (typeof raw.cmdlets !== 'object' || raw.cmdlets === null) throw new Error(`${src.id}/${f}: cmdlets is not an object`);
+    const raw = await readJson(join(dir, 'modules', f));
+    if (!isObject(raw) || !isObject(raw.cmdlets)) throw new Error(`${src.id}/${f}: cmdlets is not an object`);
     const file: CmdletFile = {};
     for (const [name, c] of Object.entries(raw.cmdlets)) {
       const detail = normalizeCmdlet(`${src.id}/${f} ${name}`, c, descriptions[name] ?? '');
@@ -119,9 +124,10 @@ async function loadRows(src: SourceDef, out: string): Promise<{ version: string;
     await writeFile(join(out, f), JSON.stringify(file));
   }
   if (!Array.isArray(manifest.d)) throw new Error(`${src.id} manifest: d is not a list`);
-  if (manifest.v !== null && typeof manifest.v !== 'string') throw new Error(`${src.id} manifest: v is not a string or null`);
+  const version = manifest.v;
+  if (version !== null && typeof version !== 'string') throw new Error(`${src.id} manifest: v is not a string or null`);
   const rows = manifest.d.map((r) => parseManifestRow(src, r, holders, descriptions));
-  return { version: manifest.v ?? '', rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
+  return { version: version ?? '', rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
 }
 
 function interner() {

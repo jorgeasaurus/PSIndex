@@ -10,7 +10,8 @@ const OVERSCAN = 8;
 /** Keyboard navigation, driven from the search box. */
 export interface ListNav {
   move: (delta: number) => void;
-  current: () => { ref: number; row: Row | undefined } | null;
+  /** The row under the cursor, fetched if the window has not materialised it yet; null with no results. */
+  current: () => Promise<Row> | null;
 }
 
 interface Props {
@@ -48,9 +49,13 @@ export function ResultList({ navRef, client, refs, openKey, onOpen, query, searc
       if (top < el.scrollTop) el.scrollTop = top;
       else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
     },
-    /** The row under the cursor: its ref, and the row itself once materialised. */
-    current: () => (refs?.length ? { ref: refs[active], row: rows.get(refs[active]) } : null),
-  }), [refs, rows, active, searchId]);
+    current: () => {
+      if (!refs?.length) return null;
+      const ref = refs[active];
+      const row = rows.get(ref);
+      return row ? Promise.resolve(row) : client.request('rows', { refs: [ref] }).then(([r]) => r);
+    },
+  }), [client, refs, rows, active, searchId]);
 
   // A new search starts at the top; a refresh of the same search (descriptions arriving) keeps the user's place.
   useLayoutEffect(() => {

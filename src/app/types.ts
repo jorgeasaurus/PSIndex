@@ -99,5 +99,4 @@ export type ToWorker =
 export type FromWorker =
   | { type: 'load-error'; message: string }
   | ({ type: 'results' } & Results)
-  | { type: 'reply'; id: number; reply: Requests[RequestType]['reply'] }
-  | { type: 'reply'; id: number; error: string };
+  | { type: 'reply'; id: number; reply: Requests[RequestType]['reply'] };

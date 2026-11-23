@@ -69,8 +69,8 @@ async function loadDescriptions(L: Loaded) {
 }
 
 /**
- * The loaded index. Every search and request waits on it, so nothing reads a half-loaded index,
- * and a failed load fails them all.
+ * The loaded index. Every search and request waits on it, so nothing reads a half-loaded index.
+ * A failed load is reported once ('load-error'); searches and requests then go unanswered.
  */
 const index = Promise.all(SOURCES.map((_, si) => loadSource(si)));
 
@@ -241,8 +241,6 @@ self.onmessage = ({ data: m }: MessageEvent<ToWorker>) => {
     index.then((all) => { if (m === lastSearch) runSearch(all, m); }, () => {});
     return;
   }
-  index.then(
-    (all) => post({ type: 'reply', id: m.id, reply: answer(all, m) }),
-    () => post({ type: 'reply', id: m.id, error: 'index unavailable' }),
-  );
+  // After a failed load nothing is answered: the page shows the load error instead.
+  index.then((all) => post({ type: 'reply', id: m.id, reply: answer(all, m) }), () => {});
 };

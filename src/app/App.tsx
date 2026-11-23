@@ -60,9 +60,9 @@ function Search() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const listRef = useRef<ListNav>(null);
-  // An Enter waiting to open the top hit of one search (its id). A newer search or any change of
-  // the open entry supersedes it.
-  const enterFor = useRef<number | null>(null);
+  // An Enter waiting to open the cursor's row in one search's results (that search's id).
+  // A newer search or any change of the open entry clears it.
+  const [enterFor, setEnterFor] = useState<number | null>(null);
   const scope = scopeOf(filters.source);
   const { theme, toggle: toggleTheme } = useTheme();
   const pulse = useAsciiField(canvasRef, scope.color, theme);
@@ -70,8 +70,7 @@ function Search() {
 
   // A layout effect, so the search is sent within the render: a key pressed right after typing
   // (Enter) already sees it as the latest, not a passive effect still waiting for the next frame.
-  useLayoutEffect(() => client.search(q, filters), [q, filters]);
-  useEffect(() => openOnEnter(), [results?.id]);
+  useLayoutEffect(() => { client.search(q, filters); setEnterFor(null); }, [q, filters]);
   const open = sel && 'row' in sel ? sel.row : null;
   const link = sel && 'link' in sel ? sel.link : '';
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
@@ -84,7 +83,7 @@ function Search() {
   useEffect(() => {
     if (!link) return;
     let live = true; // opening or closing an entry replaces the selection and supersedes this lookup
-    client.request('find', { key: link }).then((row) => live && setSel(row && { row }));
+    client.request('find', { key: link }).then((row) => live && select(row && { row }));
     return () => { live = false; };
   }, [link]);
 
@@ -106,25 +105,25 @@ function Search() {
   // Verb and the examples flag mean the same in every source, so they survive a source switch.
   const setSource = (source: Filters['source']) => setFilters((f) => ({ ...EMPTY_FILTERS, source, verb: f.verb, examples: f.examples }));
 
+  /** Every change of the open entry goes through here, so it also drops a pending Enter. */
+  const select = (next: Selection) => { setEnterFor(null); setSel(next); };
   const openRow = useCallback((row: Row) => {
-    enterFor.current = null;
-    setSel({ row });
+    select({ row });
     // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
     const pane = detailRef.current?.getBoundingClientRect();
     if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
   }, []);
-  const close = useCallback(() => { enterFor.current = null; setSel(null); }, []);
+  const close = useCallback(() => select(null), []);
 
-  /** Open the cursor's row for a pending Enter, once its search's results are on screen. */
-  const openOnEnter = () => {
-    const id = enterFor.current;
-    if (id === null || id !== client.latest || results?.id !== id) return; // superseded, or still coming
-    const cur = listRef.current?.current();
-    if (!cur) { enterFor.current = null; return; }
-    if (cur.row) return openRow(cur.row);
-    // Not materialised yet (Enter right after typing): fetch it, unless superseded meanwhile.
-    client.request('rows', { refs: [cur.ref] }).then(([row]) => { if (enterFor.current === id && client.latest === id) openRow(row); });
-  };
+  // Resolve a pending Enter once its search's results are the ones on screen.
+  useEffect(() => {
+    if (enterFor === null || results?.id !== enterFor) return;
+    const row = listRef.current?.current();
+    if (!row) return setEnterFor(null);
+    let live = true; // a newer search or another selection clears enterFor and supersedes this
+    row.then((r) => live && openRow(r));
+    return () => { live = false; };
+  }, [enterFor, results?.id]);
 
   const onKeyDown = (e: KeyboardEvent) => {
     // The box is autofocused, so the "/" shortcut lands here; nobody searches for a leading slash.
@@ -137,8 +136,7 @@ function Search() {
     else if (e.key === 'Enter') {
       e.preventDefault();
       // Enter means the cursor's row in the results of what is typed: if they are still coming, open on arrival.
-      enterFor.current = client.latest;
-      openOnEnter();
+      setEnterFor(client.latest);
     }
   };
 
