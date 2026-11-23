@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: "Comma-separated sources to refresh (ids of pipelines/<id>/refresh.sh) or 'all'"
+        description: "Comma-separated sources to refresh (ids of pipelines/<id>/source.env) or 'all'"
         default: all
 
 concurrency:
@@ -30,10 +30,10 @@ jobs:
       - id: pick
         shell: bash
         run: |
-          # Every pipelines/<source>/refresh.sh is a source.
+          # Every pipelines/<source>/source.env is a source (build-index checks this matches SOURCES).
           want="${{ github.event.inputs.sources }}"
           if [ -z "$want" ] || [ "$want" = "all" ]; then
-            want=$(ls pipelines/*/refresh.sh | cut -d/ -f2 | paste -sd, -)
+            want=$(ls pipelines/*/source.env | cut -d/ -f2 | paste -sd, -)
           fi
           echo "sources=$(jq -cn --arg s "$want" '$s | split(",") | map(gsub("\\s";"")) | map(select(length>0))')" >> "$GITHUB_OUTPUT"
 
@@ -53,7 +53,7 @@ jobs:
           python-version: "3.12"
 
       - name: Fetch upstream docs and parse
-        run: bash pipelines/${{ matrix.source }}/refresh.sh
+        run: bash pipelines/refresh.sh ${{ matrix.source }}
 
       - name: Refuse partial refreshes
         run: python3 scripts/check-shrink.py ${{ matrix.source }}

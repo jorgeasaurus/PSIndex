@@ -200,7 +200,7 @@ def main():
     print("Fetching module versions from PowerShell Gallery...")
     module_versions = fetch_module_versions()
     keep_previous_versions(module_versions, MODULE_PACKAGE_MAP, out_dir)
-    primary_version = module_versions.get('ExchangePowerShell') or '0.0.0'
+    primary_version = module_versions.get('ExchangePowerShell')
 
     manifest_entries = []
     descriptions = {}

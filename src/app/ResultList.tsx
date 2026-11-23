@@ -16,11 +16,10 @@ interface Props {
   onOpen: (r: Row) => void;
   query: string;
   empty: ComponentChildren;
-  failed?: ComponentChildren;
 }
 
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, empty, failed }: Props) {
+export function ResultList({ client, refs, active, setActive, openKey, onOpen, query, empty }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
@@ -68,7 +67,6 @@ export function ResultList({ client, refs, active, setActive, openKey, onOpen, q
     else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
   }, [active]);
 
-  if (failed) return <div class="results results-empty">{failed}</div>;
   if (refs && refs.length === 0) return <div class="results results-empty">{empty}</div>;
 
   const items = [];

@@ -41,7 +41,7 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
           <span class="tag tag-source"><span class="source-dot" aria-hidden="true" />{src.short}</span>
           {row.module && <span class="tag">{row.module}</span>}
           {row.verb && <span class="tag">{row.verb}</span>}
-          {row.category && row.category !== row.module && !row.module.endsWith('.' + row.category) && <span class="tag">{row.category}</span>}
+          {showsCategory(row) && <span class="tag">{row.category}</span>}
           {row.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{row.extra}</span>}
           {row.perms > 0 && <span class="tag">{row.perms} permission{row.perms === 1 ? '' : 's'}</span>}
         </div>
@@ -92,11 +92,11 @@ function CmdletEntry({ row }: { row: Row }) {
     case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
     case 'missing': return <p class="notice notice-error" role="alert">This cmdlet is in the index but its module file has no record for it.</p>;
     case 'failed': return <p class="notice notice-error" role="alert">Couldn’t load details ({state.message}). Check your connection and pick the cmdlet again.</p>;
-    case 'ok': return <CmdletBody c={state.cmdlet} row={row} />;
+    case 'ok': return <CmdletBody c={state.cmdlet} />;
   }
 }
 
-function CmdletBody({ c, row }: { c: CmdletDetail; row: Row }) {
+function CmdletBody({ c }: { c: CmdletDetail }) {
   const { sets, params } = useMemo(() => {
     const syntax = parseSyntax(c.syntax ?? '');
     return { sets: syntax.sets, params: withDocumented(syntax.params, c.parameters) };
@@ -106,11 +106,9 @@ function CmdletBody({ c, row }: { c: CmdletDetail; row: Row }) {
   const hidden = params.length - visible.length;
   const examples = (c.examples ?? []).filter((x) => x.trim());
   const perms = c.permissions ?? [];
-  const description = c.description || row.desc;
-
   return (
     <>
-      {description && <p class="detail-desc">{description}</p>}
+      {c.description && <p class="detail-desc">{c.description}</p>}
 
       {sets.length > 0 && (
         <section class="block">
@@ -175,8 +173,11 @@ function CodeFrame({ copy, syntax, children }: { copy: string; syntax?: boolean;
   );
 }
 
+/** A category tag adds nothing when it repeats the module ("Groups" for Microsoft.Graph.Groups). */
+const showsCategory = (row: Row) => !!row.category && row.category !== row.module && !row.module.endsWith('.' + row.category);
+
 function learnUrl(row: Row, src: SourceMeta): string {
-  if (!src.learn || (src.learn.includes('{module}') && !row.module)) return '';
+  if (src.learn.includes('{module}') && !row.module) return '';
   return src.learn.replace('{module}', row.module.toLowerCase()).replace('{name}', row.name.toLowerCase());
 }
 

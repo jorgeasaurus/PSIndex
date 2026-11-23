@@ -46,14 +46,14 @@ npm run test:e2e   # browser checks against the built site (needs Playwright + C
 
 ## Refresh data locally
 
-Each source has a script that fetches its upstream docs into a temp directory and rewrites `data/<source>/`:
+`pipelines/refresh.sh <source>` clones that source's upstream docs (configured in `pipelines/<source>/source.env`) into a temp directory and rewrites `data/<source>/`:
 
 ```bash
-bash pipelines/mecm/refresh.sh
+bash pipelines/refresh.sh mecm
 python3 scripts/check-shrink.py mecm   # refuses a refresh that lost entries or its version
 ```
 
-`.github/workflows/update-data.yml` runs the same scripts daily, or on demand from the Actions tab (input `sources`: `all` or e.g. `graph,mecm`). New sources are a `pipelines/<id>/refresh.sh` plus an entry in `SOURCES` in `scripts/build-index.mjs`.
+`.github/workflows/update-data.yml` runs the same script daily for every source, or on demand from the Actions tab (input `sources`: `all` or e.g. `graph,mecm`). A new source needs `pipelines/<id>/` (a `parse_docs.py` and a `source.env`), its `data/<id>/`, and an entry in `SOURCES` in `scripts/build-index.mjs`; the build fails if those three disagree.
 
 PowerShell alternatives that read installed modules instead of docs: `pipelines/az/get-azcmdlets.ps1`, `pipelines/mecm/get-mecmcmdlets.ps1`.
 

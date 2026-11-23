@@ -64,9 +64,10 @@ const SCOPES = new Map<SourceId, Scope>([
   }]),
 ]);
 
-export const isScope = (id: string) => SCOPES.has(id);
-/** Unknown ids (stale links) fall back to every source. */
-export const scopeOf = (id: SourceId): Scope => SCOPES.get(id) ?? ALL;
+/** A scope id from outside (the URL): unknown or missing ids, e.g. stale links, mean every source. */
+export const parseScope = (id: string | null): SourceId => (id && SCOPES.has(id) ? id : ALL.id);
+/** Scope ids in app state are always valid (they come from parseScope, SOURCES or ALL). */
+export const scopeOf = (id: SourceId): Scope => SCOPES.get(id)!;
 
 const META = new Map(SOURCES.map((s) => [s.id, s]));
 /** Rows only come from the worker, which only knows SOURCES, so a row's source always resolves. */

@@ -8,10 +8,10 @@ export interface SourceMeta {
   color: string;
   /** The shard's `x` facet for this source: its label and an optional value shown as a caution ("beta"). */
   extra: { label: string; warn?: string } | null;
-  learn: string; // Microsoft Learn URL template with {module} / {name}, or '' for none
+  learn: string; // Microsoft Learn URL template with {module} / {name}
   sample: string; // example search shown on the intro panel
   count: number;
-  version: string;
+  version: string; // '' when unknown
 }
 
 /** Columnar index shard written by scripts/build-index.mjs. */
@@ -32,17 +32,25 @@ export interface IndexShard {
 }
 
 /** Module files under public/data/<source>/, as written by the pipelines. */
+/** A parameter as a pipeline documents it (MECM does; others are parsed from the syntax). */
+export interface DocumentedParam {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+}
+
 export interface CmdletDetail {
   syntax?: string;
   examples?: string[];
   permissions?: string[];
-  parameters?: { name: string; type: string; required: boolean; description?: string }[];
+  parameters?: DocumentedParam[];
   description?: string;
 }
 export interface CmdletFile { module: string; cmdlets: Record<string, CmdletDetail> }
 
 export interface Filters {
-  source: SourceId | 'all';
+  source: SourceId; // a source id, or 'all'
   verb: string;
   module: string;
   category: string;

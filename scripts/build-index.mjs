@@ -5,6 +5,7 @@
 //   public/data/<source>/<module>.json – per-module detail, fetched on demand
 import { readFile, writeFile, readdir, mkdir, rm } from 'node:fs/promises';
 import { join, basename } from 'node:path';
+import { existsSync } from 'node:fs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(ROOT, 'data');
@@ -67,6 +68,9 @@ async function loadRows(src, out) {
   return { version: manifest.v, rows: rows.sort((a, b) => a.n.localeCompare(b.n)) };
 }
 
+/** Pipelines write null, or '0.0.0' (Az's parser), when a version is unknown; the app sees ''. */
+const knownVersion = (v) => (v && v !== '0.0.0' ? v : '');
+
 function interner() {
   const list = [];
   const map = new Map();
@@ -97,8 +101,24 @@ function buildShard(rows) {
   return { index, desc: rows.map((r) => clip(r.desc)) };
 }
 
+/** SOURCES, data/<id>/ and pipelines/<id>/source.env must name the same sources. */
+async function checkRegistries() {
+  const ids = SOURCES.map((s) => s.id).sort().join(',');
+  const dirs = async (root, marker) => (await readdir(root, { withFileTypes: true }))
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .filter((name) => !marker || existsSync(join(root, name, marker)))
+    .sort().join(',');
+  const data = await dirs(DATA);
+  const pipelines = await dirs(join(ROOT, 'pipelines'), 'source.env');
+  if (data !== ids || pipelines !== ids) {
+    throw new Error(`Source lists disagree. SOURCES: ${ids}; data/: ${data}; pipelines/*/source.env: ${pipelines}`);
+  }
+}
+
 async function main() {
   const t0 = Date.now();
+  await checkRegistries();
   await rm(OUT_IDX, { recursive: true, force: true });
   await rm(OUT_DATA, { recursive: true, force: true });
   await mkdir(OUT_IDX, { recursive: true });
@@ -111,7 +131,7 @@ async function main() {
     await writeFile(join(OUT_IDX, `${src.id}.json`), JSON.stringify(index));
     await writeFile(join(OUT_IDX, `${src.id}.desc.json`), JSON.stringify(desc));
     const extra = src.extra && { label: src.extra.label, ...(src.extra.warn && { warn: src.extra.warn }) };
-    sources.push({ ...src, extra, count: rows.length, version: version ?? '' });
+    sources.push({ ...src, extra, count: rows.length, version: knownVersion(version) });
     console.log(`  ${src.id.padEnd(9)} ${String(rows.length).padStart(6)} cmdlets`);
   }
   const total = sources.reduce((a, s) => a + s.count, 0);

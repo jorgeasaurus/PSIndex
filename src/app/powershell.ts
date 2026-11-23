@@ -29,12 +29,10 @@ export function tokenize(src: string): Tok[] {
   return out;
 }
 
-export interface Param {
-  name: string;
-  type: string;
-  required: boolean;
+import type { DocumentedParam } from './types';
+
+export interface Param extends DocumentedParam {
   positional: boolean;
-  description?: string;
 }
 
 export interface Syntax {
@@ -112,7 +110,7 @@ export function parseSyntax(syntax: string): Syntax {
 }
 
 /** Parameters some pipelines document (MECM) take precedence; the syntax fills in type and position. */
-export function withDocumented(parsed: Param[], documented: { name: string; type: string; required: boolean; description?: string }[] = []): Param[] {
+export function withDocumented(parsed: Param[], documented: DocumentedParam[] = []): Param[] {
   if (!documented.length) return parsed;
   const byName = new Map(parsed.map((p) => [p.name, p]));
   return documented.map((p) => ({

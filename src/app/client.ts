@@ -47,7 +47,7 @@ export class SearchClient {
       if (row) found.set(ref, row); else missing.push(ref);
     }
     if (missing.length) {
-      const got = await this.request('rows', { refs: missing });
+      const got = await this.ask('rows', { refs: missing });
       if (this.rowCache.size + got.length > ROW_CACHE_MAX) this.rowCache.clear();
       got.forEach((row, k) => { found.set(missing[k], row); this.rowCache.set(missing[k], row); });
     }
@@ -65,8 +65,12 @@ export class SearchClient {
     this.rowListeners.forEach((l) => l());
   }
 
-  /** Ask the worker a question once its index has loaded. */
-  async request<K extends RequestType>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
+  /** Ask the worker a question once its index has loaded. Rows go through `rows()` and its cache. */
+  request<K extends Exclude<RequestType, 'rows'>>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
+    return this.ask(type, args);
+  }
+
+  private async ask<K extends RequestType>(type: K, args: Requests[K]['args']): Promise<Requests[K]['reply']> {
     await this.ready;
     const id = ++this.seq;
     return new Promise((resolve) => {

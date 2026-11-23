@@ -34,8 +34,13 @@ if drop > limit:
     print(f"::error::{src} lost {old - new} entries ({drop:.1%} > {limit:.0%}); refusing to commit a partial refresh")
     sys.exit(1)
 
+def has_version(v):
+    """Pipelines write null, or '0.0.0' (Az), when a version is unknown — the same rule as build-index."""
+    return bool(v) and v != "0.0.0"
+
+
 # A version that disappears means a lookup (e.g. PowerShell Gallery) failed, not a real release.
 old_v, new_v = old_doc.get("v"), new_doc.get("v")
-if old_v and old_v != "0.0.0" and (not new_v or new_v == "0.0.0"):
+if has_version(old_v) and not has_version(new_v):
     print(f"::error::{src} version went from {old_v!r} to {new_v!r}; refusing to commit a degraded refresh")
     sys.exit(1)
