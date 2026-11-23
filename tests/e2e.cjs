@@ -241,7 +241,10 @@ async function run(browser) {
     release();
   }
   await rowsReady(p);
-  await p.waitForTimeout(300);
+  // The worker answers in order: once a search issued now has rendered, any row fetch the stale
+  // Enter could have made has been answered too.
+  await p.fill('input[type=search]', 'get-azvm');
+  await p.waitForFunction(() => document.querySelector('.result .result-name')?.textContent === 'Get-AzVM');
   check(!(await p.locator('.detail-title').count()) && !param(p, 'c'), 'superseded Enter opens nothing');
   await ctx.close();
 

@@ -98,17 +98,25 @@ jobs:
 
       - name: Commit
         shell: bash
+        # One identity for every git write in this step: the commit, and the rebase that replays it.
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           git add data
           if git diff --cached --quiet; then echo "No data changes."; exit 0; fi
           changed=$(git diff --cached --name-only | cut -d/ -f2 | sort -u | paste -sd, -)
-          git -c user.name="github-actions[bot]" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "chore(data): refresh ${changed}"
+          git commit -m "chore(data): refresh ${changed}"
           # main may have moved since this run checked out; carry the data-only commit forward.
           branch="${GITHUB_REF_NAME}"
           for attempt in 1 2 3; do
-            git pull --rebase origin "$branch" && git push origin "HEAD:$branch" && exit 0
+            if git pull --rebase origin "$branch"; then
+              git push origin "HEAD:$branch" && exit 0
+            else
+              git rebase --abort || true # leave the tree clean for the next attempt
+            fi
             sleep $((attempt * 5))
           done
           exit 1
