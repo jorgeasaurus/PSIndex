@@ -1,28 +1,29 @@
 // Tiny PowerShell tokenizer for syntax blocks and examples. Returns tokens; the UI renders them.
-export type Tok = { t: 'cmd' | 'param' | 'type' | 'var' | 'str' | 'com' | 'op' | 'num' | 'txt'; v: string };
+// Token kinds and their patterns, in match order. The kinds become CSS classes (`t-<kind>`, Detail.tsx).
+const PATTERNS = {
+  com: String.raw`#[^\n]*`,
+  str: String.raw`"(?:[^"\\\x60]|[\\\x60].)*"|'(?:[^']|'')*'`,
+  var: String.raw`\$(?:\{[^}]*\}|[\w:]+)`,
+  cmd: String.raw`\b[A-Z][a-z]+-[A-Za-z0-9]+\b`,
+  param: String.raw`(?<![\w-])-[A-Za-z][\w]*`,
+  type: String.raw`<[^<>\n]+>|\[[A-Za-z][\w.\[\]]*\](?=\s*[\$(\w]|$)`,
+  num: String.raw`\b\d+(?:\.\d+)?\b`,
+  op: String.raw`[|{}()=;@,]`,
+} as const;
+type Kind = keyof typeof PATTERNS;
+/** Object.keys loses the key type; these are exactly PATTERNS' keys. */
+const KINDS = Object.keys(PATTERNS) as Kind[];
+export type Tok = { t: Kind | 'txt'; v: string };
 
-const RE = new RegExp(
-  [
-    String.raw`(?<com>#[^\n]*)`,
-    String.raw`(?<str>"(?:[^"\\\x60]|[\\\x60].)*"|'(?:[^']|'')*')`,
-    String.raw`(?<var>\$(?:\{[^}]*\}|[\w:]+))`,
-    String.raw`(?<cmd>\b[A-Z][a-z]+-[A-Za-z0-9]+\b)`,
-    String.raw`(?<param>(?<![\w-])-[A-Za-z][\w]*)`,
-    String.raw`(?<type><[^<>\n]+>|\[[A-Za-z][\w.\[\]]*\](?=\s*[\$(\w]|$))`,
-    String.raw`(?<num>\b\d+(?:\.\d+)?\b)`,
-    String.raw`(?<op>[|{}()=;@,])`,
-  ].join('|'),
-  'g',
-);
+const RE = new RegExp(KINDS.map((k) => `(?<${k}>${PATTERNS[k]})`).join('|'), 'g');
 
 export function tokenize(src: string): Tok[] {
   const out: Tok[] = [];
   let last = 0;
   for (const m of src.matchAll(RE)) {
     if (m.index! > last) out.push({ t: 'txt', v: src.slice(last, m.index) });
-    const g = m.groups!;
-    const t = (Object.keys(g).find((k) => g[k] !== undefined) ?? 'txt') as Tok['t'];
-    out.push({ t, v: m[0] });
+    // Every match is exactly one top-level group.
+    out.push({ t: KINDS.find((k) => m.groups![k] !== undefined)!, v: m[0] });
     last = m.index! + m[0].length;
   }
   if (last < src.length) out.push({ t: 'txt', v: src.slice(last) });

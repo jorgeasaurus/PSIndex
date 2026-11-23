@@ -124,8 +124,11 @@ const scenarios = [
     async run(p) {
       await p.goto(`${BASE}/?s=graph`);
       await rowsReady(p);
+      const unfiltered = await p.textContent('.count');
       await p.fill('input[type=search]', 'site settings'); // descriptions add matches above row 4 for this query
-      await p.waitForFunction(() => document.querySelectorAll('.result:not(.result-skel)').length > 5);
+      // Wait for this query's own results, not the unfiltered list still on screen.
+      await p.waitForFunction((was) => document.querySelector('.count')?.textContent !== was
+        && document.querySelectorAll('.result:not(.result-skel)').length > 5, unfiltered);
       for (let k = 0; k < 4; k++) await p.keyboard.press('ArrowDown');
       const before = await p.textContent('.result.is-active .result-name');
       const rowTop = () => p.evaluate(() => document.querySelector('.result.is-active')?.style.top);
