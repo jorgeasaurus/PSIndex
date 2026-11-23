@@ -1,0 +1,124 @@
+name: Update data
+
+# Replaces the per-repo workflows of MgGraphIndex, AzIndex, EntraIndex, ExchIndex,
+# and MecmIndex. Each source refreshes in its own job; one job commits
+# the result, and the push triggers a Vercel deployment.
+
+on:
+  schedule:
+    - cron: "17 5 * * *" # daily
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Comma-separated sources to refresh (ids of pipelines/<id>/source.env) or 'all'"
+        default: all
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      sources: ${{ steps.pick.outputs.sources }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        shell: bash
+        run: |
+          # Every pipelines/<source>/source.env is a source (build-index checks this matches SOURCES).
+          want="${{ github.event.inputs.sources }}"
+          if [ -z "$want" ] || [ "$want" = "all" ]; then
+            want=$(ls pipelines/*/source.env | cut -d/ -f2 | paste -sd, -)
+          fi
+          echo "sources=$(jq -cn --arg s "$want" '$s | split(",") | map(gsub("\\s";"")) | map(select(length>0))')" >> "$GITHUB_OUTPUT"
+
+  refresh:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJson(needs.plan.outputs.sources) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch upstream docs and parse
+        run: bash pipelines/refresh.sh ${{ matrix.source }}
+
+      - name: Refuse partial refreshes
+        run: python3 scripts/check-shrink.py ${{ matrix.source }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The deploy builds the index from data/. Checking here, with the other sources as committed,
+      # means a source the build would reject uploads nothing and the rest still commit.
+      - name: Refuse data the index build rejects
+        run: npm ci && npm run index
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: data-${{ matrix.source }}
+          path: data/${{ matrix.source }}
+          retention-days: 3
+
+  commit:
+    needs: refresh
+    # Commit whatever refreshed cleanly, even if one source failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: refreshed
+
+      - name: Apply refreshed sources
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for dir in refreshed/data-*; do
+            src="${dir#refreshed/data-}"
+            rm -rf "data/$src" && mkdir -p "data/$src" && cp -r "$dir"/. "data/$src/"
+            echo "applied $src"
+          done
+
+      # The push below uses GITHUB_TOKEN, which does not trigger ci.yml, yet Vercel deploys it.
+      # So the combined refreshed data passes the same gate as a PR (npm run verify, which ci.yml
+      # runs too); if upstream docs moved a cmdlet the suite relies on, nothing ships until fixed.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build and test the refreshed site
+        run: npm ci && npm run verify
+
+      - name: Commit
+        shell: bash
+        # The bot identity for the commit.
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          git add data
+          if git diff --cached --quiet; then echo "No data changes."; exit 0; fi
+          changed=$(git diff --cached --name-only | cut -d/ -f2 | sort -u | paste -sd, -)
+          git commit -m "chore(data): refresh ${changed}"
+          # Push exactly the tree tested above. If main moved meanwhile the push is rejected (not a
+          # fast-forward) and the run fails; the next run refreshes and tests against the new main.
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -2,10 +2,10 @@ node_modules/
 dist/
 .astro/
 .vercel/
-public/data/
-public/idx/
+public/a/
 .impeccable/review/
 .impeccable/mocks/
 __pycache__/
 docs_work/
 .DS_Store
+src/sources.generated.json

@@ -1,0 +1,31 @@
+---
+import '../styles/global.css';
+import App from '../app/App';
+import { SOURCE_LABELS, TOTAL, formatCount } from '../app/sources';
+import { THEME_KEY } from '../app/theme';
+
+const title = 'PSIndex — PowerShell cmdlet search for Microsoft 365 and Azure';
+const description = `Search ${formatCount(TOTAL)} ${SOURCE_LABELS} cmdlets in one place.`;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#090c13" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#eef0f5" media="(prefers-color-scheme: light)" />
+    <meta property="og:title" content="PSIndex" />
+    <meta property="og:description" content={description} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script is:inline define:vars={{ THEME_KEY }}>
+      try { const t = localStorage.getItem(THEME_KEY); if (t) document.documentElement.dataset.theme = t; } catch {}
+    </script>
+  </head>
+  <body>
+    <App client:load />
+    <noscript><p style="padding:24px">PSIndex searches in your browser and needs JavaScript.</p></noscript>
+  </body>
+</html>
