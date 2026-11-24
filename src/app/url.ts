@@ -8,10 +8,9 @@ const OPEN = 'c';
 
 /** One filter's URL parameter: its name, and how its value is read and written (null = omitted). */
 interface Codec<T> { param: string; read: (raw: string | null) => T; write: (v: T) => string | null }
-const text = (param: string): Codec<string> => ({ param, read: (raw) => raw ?? '', write: (v) => v || null });
+const text = (param: string): Codec<string> => ({ param, read: (raw) => raw?.trim() ?? '', write: (v) => v || null });
 
 const CODECS: { [K in keyof Filters]: Codec<Filters[K]> } = {
-  // Unknown or stale source ids mean every source.
   source: { param: 's', read: parseScope, write: (v) => (v === ALL.id ? null : v) },
   verb: text('verb'),
   module: text('module'),
@@ -44,12 +43,13 @@ export interface UrlState { q: string; filters: Filters; open: string }
 
 export function readUrl(): UrlState {
   const p = new URLSearchParams(location.search);
-  return { q: p.get(QUERY) ?? '', filters: filtersFrom(p), open: p.get(OPEN) ?? '' };
+  // Pasted links often carry stray spaces; a blank value is no value.
+  return { q: (p.get(QUERY) ?? '').trim(), filters: filtersFrom(p), open: (p.get(OPEN) ?? '').trim() };
 }
 
 export function writeUrl({ q, filters, open }: UrlState) {
   const p = new URLSearchParams();
-  if (q.trim()) p.set(QUERY, q); // a blank query is no query
+  if (q.trim()) p.set(QUERY, q.trim()); // a blank query is no query; padding is not part of it
   const write = <K extends keyof Filters>(k: K) => {
     const v = CODECS[k].write(filters[k]);
     if (v !== null) p.set(CODECS[k].param, v);

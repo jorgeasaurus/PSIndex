@@ -5,7 +5,7 @@ import { useAsciiField } from './ascii';
 import { useTheme } from './theme';
 import { ResultList, ResultsSkeleton, type ListNav } from './ResultList';
 import { Detail } from './Detail';
-import { Band, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
+import { Band, DescriptionsFailed, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
 import { ALL, formatCount, queryTokens, scopeOf } from './sources';
 import { EMPTY_FILTERS, activeFilters, readUrl, writeUrl } from './url';
 import type { Facets, Filters, Results, Row } from './types';
@@ -229,6 +229,7 @@ function Search() {
               <button type="button" class="chip" onClick={close}>Dismiss</button>
             </div>
           )}
+          {results?.descriptions === 'failed' && <DescriptionsFailed />}
           {showFilters && (
             <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={() => setFilters({ ...EMPTY_FILTERS, source: filters.source })} />
           )}
@@ -244,7 +245,7 @@ function Search() {
             onOpen={openRow}
             onCursor={setActiveId}
             query={q}
-            empty={<EmptyState q={q.trim()} described={!!results?.described} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => { setFilters(EMPTY_FILTERS); inputRef.current?.focus(); }} />}
+            empty={<EmptyState q={q.trim()} descriptions={results?.descriptions ?? 'loading'} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => { setFilters(EMPTY_FILTERS); inputRef.current?.focus(); }} />}
           />
         )
       }

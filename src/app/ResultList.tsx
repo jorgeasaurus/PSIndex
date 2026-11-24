@@ -1,7 +1,7 @@
 import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { SearchClient } from './client';
-import { isWarnExtra, queryTokens, sourceOf, srcStyle } from './sources';
+import { flatMatch, isWarnExtra, queryTokens, sourceOf, srcStyle } from './sources';
 import type { Results, Row } from './types';
 
 const ROW_H = 64;
@@ -156,7 +156,7 @@ function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number
     >
       <div class="result-line">
         <span class="source-dot" aria-hidden="true" />
-        <code class="result-name"><Mark text={row.name} q={query} /></code>
+        <code class="result-name" title={row.name}><Mark text={row.name} q={query} /></code>
         <span class="result-meta">{tag}</span>
       </div>
       <p class="result-desc">{row.desc || <span class="result-module">{row.module}</span>}</p>
@@ -173,10 +173,10 @@ function locate(name: string, t: string): readonly [number, number] | null {
   const at = lower.indexOf(t);
   if (at >= 0) return [at, t.length];
   const keep = [...lower].flatMap((c, i) => (c === '-' ? [] : [i])); // flat index -> name index
-  const flatT = t.replace(/-/g, '');
-  const fa = flatT ? keep.map((i) => lower[i]).join('').indexOf(flatT) : -1;
+  const flatLen = t.replace(/-/g, '').length;
+  const fa = flatMatch(lower, lower.replace(/-/g, ''), t);
   if (fa < 0) return null;
-  const start = keep[fa], end = keep[fa + flatT.length - 1] + 1;
+  const start = keep[fa], end = keep[fa + flatLen - 1] + 1;
   return [start, end - start];
 }
 

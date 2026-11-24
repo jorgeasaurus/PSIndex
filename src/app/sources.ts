@@ -29,26 +29,55 @@ const FETCH_TIMEOUT_MS = 20_000;
  * deploy), a server error, or a damaged file.
  */
 export async function fetchAsset<T>(path: string): Promise<T> {
+  const noAnswer = () => new AssetError('The server didn’t answer. Check your connection.', 'retry');
   let r: Response;
   try {
     r = await fetch(assetUrl(path), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch {
-    throw new Error('The server didn’t answer. Check your connection.');
+    throw noAnswer();
   }
-  if (r.status === 404) throw new Error('This page is out of date: a newer version of PSIndex has been published. Reload the page.');
-  if (!r.ok) throw new Error(`The server answered with an error (HTTP ${r.status}).`);
+  if (r.status === 404) throw new AssetError('This page is out of date: a newer version of PSIndex has been published.', 'reload');
+  if (!r.ok) throw new AssetError(`The server answered with an error (HTTP ${r.status}).`, 'retry');
   try {
     return await r.json();
-  } catch {
-    throw new Error('The server sent a damaged file.');
+  } catch (e) {
+    // The timeout can also cut the body off mid-read: that is no answer, not a damaged file.
+    if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw noAnswer();
+    throw new AssetError('The server sent a damaged file.', 'reload');
   }
+}
+
+/**
+ * A failed artifact fetch, with the one action that can fix it: `retry` the same request (no
+ * answer, a server error) or `reload` the page (this build's file is gone or damaged, so the same
+ * request fails again).
+ */
+export class AssetError extends Error {
+  constructor(message: string, readonly fix: 'retry' | 'reload') { super(message); }
 }
 
 /** The extra value a source flags as a caution, e.g. Graph's "beta" API. */
 export const isWarnExtra = (s: SourceMeta, extra: string) => !!extra && extra === s.extra?.warn;
 
-/** Query tokens as both the worker and the highlighter split them. */
-export const queryTokens = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean);
+/** Query tokens as both the worker and the highlighter split them: a token needs a letter or digit ("--" is no token). */
+export const queryTokens = (q: string) => q.toLowerCase().split(/\s+/).filter((t) => /[a-z0-9]/.test(t));
+
+/**
+ * Where a token matches a lower-cased cmdlet name with every hyphen ignored ("getmguser" in
+ * get-mguser): the index in the hyphen-free name, or -1. A match that runs from the verb into the
+ * noun must take at least two letters of the noun, so an ordinary word like "removes" doesn't
+ * match every Remove-S* cmdlet as "remove" + "s".
+ */
+export function flatMatch(lname: string, lflat: string, token: string): number {
+  const flatT = token.replace(/-/g, '');
+  if (!flatT) return -1;
+  const verbEnd = lname.indexOf('-'); // = the noun's start in the hyphen-free name
+  for (let at = lflat.indexOf(flatT); at >= 0; at = lflat.indexOf(flatT, at + 1)) {
+    const crosses = verbEnd > 0 && at < verbEnd && at + flatT.length > verbEnd;
+    if (!crosses || at + flatT.length - verbEnd >= 2) return at;
+  }
+  return -1;
+}
 
 /**
  * What the UI is searching: one source, or every source ("all"). Everything that differs
@@ -91,7 +120,11 @@ const SCOPES = new Map<SourceId, Scope>([
 ]);
 
 /** A scope id from outside (the URL): unknown or missing ids, e.g. stale links, mean every source. */
-export const parseScope = (id: string | null): SourceId => (id && SCOPES.has(id) ? id : ALL.id);
+/** A URL's source id, read case-insensitively ("?s=Graph"); unknown or stale ids mean every source. */
+export const parseScope = (raw: string | null): SourceId => {
+  const id = raw?.trim().toLowerCase();
+  return id && SCOPES.has(id) ? id : ALL.id;
+};
 /** Scope ids in app state are always valid (they come from parseScope, SOURCES or ALL). */
 export const scopeOf = (id: SourceId): Scope => SCOPES.get(id)!;
 

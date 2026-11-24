@@ -4,7 +4,7 @@ import { ArrowLeft, ExternalLink, Link2 } from 'lucide-preact';
 import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
 import { isCommonParam, parseSyntax, tokenize, withDocumented } from './powershell';
-import { isWarnExtra, sourceOf, srcStyle } from './sources';
+import { AssetError, isWarnExtra, sourceOf, srcStyle } from './sources';
 import { entryUrl } from './url';
 import type { CmdletDetail, CmdletFile, Row, SourceMeta } from './types';
 
@@ -57,7 +57,7 @@ export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
         </div>
       </div>
 
-      <CmdletEntry row={row} />
+      <CmdletEntry row={row} onRetry={() => title.current?.focus({ preventScroll: true })} />
 
       {related.length > 0 && (
         <section class="block">
@@ -77,10 +77,13 @@ export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
   );
 }
 
-type EntryState = { status: 'loading' } | { status: 'failed'; message: string } | { status: 'ok'; cmdlet: CmdletDetail };
+type EntryState = { status: 'loading' } | { status: 'failed'; error: AssetError } | { status: 'ok'; cmdlet: CmdletDetail };
 
-/** Loads the row's module file and renders its entry, or the loading / error state. */
-function CmdletEntry({ row }: { row: Row }) {
+/**
+ * Loads the row's module file and renders its entry, or the loading / error state. `onRetry` keeps
+ * focus in the entry when "Try again" is pressed (the button itself goes away while loading).
+ */
+function CmdletEntry({ row, onRetry }: { row: Row; onRetry: () => void }) {
   const [state, setState] = useState<EntryState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0); // "Try again" loads the file afresh (failures aren't cached)
   useEffect(() => {
@@ -90,10 +93,10 @@ function CmdletEntry({ row }: { row: Row }) {
       .then((file: CmdletFile) => {
         // The build writes each row's file from the entries that hold its name, so a miss is a broken file.
         const cmdlet = file[row.name];
-        if (!cmdlet) throw new Error('The server sent a damaged file.');
+        if (!cmdlet) throw new AssetError('The server sent a damaged file.', 'reload');
         if (live) setState({ status: 'ok', cmdlet });
       })
-      .catch((e) => live && setState({ status: 'failed', message: e.message }));
+      .catch((e: AssetError) => live && setState({ status: 'failed', error: e }));
     return () => { live = false; };
   }, [row.key, attempt]);
 
@@ -101,8 +104,10 @@ function CmdletEntry({ row }: { row: Row }) {
     case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
     case 'failed': return (
       <div class="notice notice-error" role="alert">
-        <p>Couldn’t load the details. {state.message}</p>
-        <button type="button" class="chip" onClick={() => setAttempt((a) => a + 1)}>Try again</button>
+        <p>Couldn’t load the details. {state.error.message}</p>
+        {state.error.fix === 'reload'
+          ? <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
+          : <button type="button" class="chip" onClick={() => { onRetry(); setAttempt((a) => a + 1); }}>Try again</button>}
       </div>
     );
     case 'ok': return <CmdletBody c={state.cmdlet} />;

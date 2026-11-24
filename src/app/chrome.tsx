@@ -4,7 +4,7 @@ import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, srcStyle } from './sources';
-import type { Facets, Filters, SourceId } from './types';
+import type { Descriptions, Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
 export function Frame({ source, isOpen, dialog, inert, canvasRef, detailRef, band, toolbar, results, detail }: {
@@ -186,14 +186,24 @@ function Select({ label, value, options, onChange }: { label: string; value: str
   );
 }
 
-export function EmptyState({ q, inLabel, filtered, described, reset }: { q: string; inLabel: string; filtered: boolean; described: boolean; reset: () => void }) {
+export function EmptyState({ q, inLabel, filtered, descriptions, reset }: { q: string; inLabel: string; filtered: boolean; descriptions: Descriptions; reset: () => void }) {
   // Descriptions load after names; until then a query that only a description matches finds nothing yet.
-  if (q && !described) return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
+  if (q && descriptions === 'loading') return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
   return (
     <div class="empty">
       <p class="empty-title">{q ? <>No match for “{q}”{inLabel}.</> : 'Nothing matches these filters.'}</p>
-      <p>Try the noun alone (<code>MgUser</code> instead of <code>Get-MgUser</code>), or fewer words.</p>
+      {q && <p>Try the noun alone (<code>MgUser</code> instead of <code>Get-MgUser</code>), or fewer words.</p>}
       {filtered && <button type="button" class="chip" onClick={reset}>Search every source</button>}
+    </div>
+  );
+}
+
+/** Shown while a scope's descriptions failed to load: results come from names alone. */
+export function DescriptionsFailed() {
+  return (
+    <div class="notice notice-error notice-link" role="status">
+      <p>Descriptions didn’t load, so only cmdlet names are searched.</p>
+      <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
     </div>
   );
 }
