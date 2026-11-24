@@ -43,9 +43,9 @@ function createServer(origin: string) {
   });
   server.registerTool('search_cmdlets', {
     title: 'Search cmdlets',
-    description: 'Search the PSIndex catalog of Microsoft Graph, Azure (Az), Entra, Exchange/Teams/SharePoint, and Configuration Manager PowerShell cmdlets. Matches names (hyphens optional, so getmguser finds Get-MgUser) and short descriptions, using the same ranking as the website. Returns name, module, source, a short description, and the PSIndex page URL.',
+    description: 'Search the PSIndex catalog of Microsoft Graph, Azure (Az), Entra, Exchange/Teams/SharePoint, and Configuration Manager PowerShell cmdlets. Matches names (hyphens optional, so getmguser finds Get-MgUser) and short descriptions, using the same ranking as the website. Returns name, module, source, a short description, and the PSIndex page URL. namesOnly lists sources whose descriptions could not be read: there only names were searched and descriptions are empty, so few or no results do not mean nothing matches.',
     inputSchema: {
-      query: z.string().trim().min(1).max(200).refine((q) => /[a-z0-9]/i.test(q), 'Query needs a letter or digit.').describe('Name, noun, or words to search for. Must contain a letter or digit. Hyphens are optional.'),
+      query: z.string().trim().min(1).max(200).refine((q) => /[a-z0-9]/i.test(q), 'Query needs an ASCII letter or digit; cmdlet names are ASCII.').describe('Name, noun, or words to search for. Must contain an ASCII letter or digit, since cmdlet names are ASCII. Hyphens are optional.'),
       module: z.string().trim().min(1).max(200).optional().describe('Limit results to this PowerShell module, for example Microsoft.Graph.Users. Case-insensitive.'),
       limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe(`Maximum results to return. Default ${DEFAULT_LIMIT}, maximum ${MAX_LIMIT}.`),
     },
@@ -98,13 +98,13 @@ function withCors(res: Response): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
-export function handleMcp(request: Request): Promise<Response> | Response {
+/** `origin` is the one the client called, which result urls point at. */
+export function handleMcp(request: Request, origin: string): Promise<Response> | Response {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-  return dispatch(request);
+  return dispatch(request, origin);
 }
 
-async function dispatch(request: Request): Promise<Response> {
-  const origin = new URL(request.url).origin;
+async function dispatch(request: Request, origin: string): Promise<Response> {
   const server = createServer(origin);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,

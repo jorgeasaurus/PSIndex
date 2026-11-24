@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 import { artifactPath } from './artifacts';
 import { descriptionsOf, facetsFor, prepareSource, refOfKey, related, rowOf, searchHits, setDescriptions, type Loaded } from './search-core';
-import { SOURCES, fetchAsset, scopeOf } from './sources';
+import { SOURCES, fetchAsset, scopeOf, searchText } from './sources';
+import { EMPTY_FILTERS, sameFilters } from './url';
 import type { Filters, FromWorker, IndexShard, RequestType, Requests, ToWorker } from './types';
 
 type Search = { id: number; q: string; filters: Filters };
@@ -44,7 +45,10 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   const { sources, perSourceFacets } = scopeOf(filters.source);
   const scope = all.filter((L) => sources.some((s) => s.id === L.id));
   const refs = Int32Array.from(hits, (h) => h.ref);
-  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0, descriptions: descriptionsOf(scope) }, [refs.buffer]);
+  // When the filters leave nothing, say whether they are why: the query may match the cmdlet they hide.
+  const bare = { ...EMPTY_FILTERS, source: filters.source };
+  const hidden = !hits.length && searchText(q) && !sameFilters(filters, bare) ? searchHits(all, q, bare, { literal: true }).length : 0;
+  post({ type: 'results', id, q, source: filters.source, refs, facets: facetsFor(scope, perSourceFacets), hidden, ms: performance.now() - t0, descriptions: descriptionsOf(scope) }, [refs.buffer]);
 }
 
 /** One handler per request; the compiler checks each reply against Requests in types.ts. */

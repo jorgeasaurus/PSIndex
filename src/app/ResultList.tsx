@@ -9,7 +9,10 @@ const OVERSCAN = 8;
 
 /** Keyboard navigation, driven from the search box. */
 export interface ListNav {
+  /** Move the cursor by rows; ±Infinity jumps to the last or first row. */
   move: (delta: number) => void;
+  /** Move the cursor by a screenful of rows. */
+  page: (dir: 1 | -1) => void;
   /** The row under the cursor, fetched if the window has not materialised it yet; null with no results. */
   current: () => Promise<Row> | null;
 }
@@ -37,6 +40,7 @@ export function ResultList({ navRef, client, results, openKey, onOpen, onCursor,
   const searchId = results?.id;
   const scroller = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: 30 });
+  const [width, setWidth] = useState(0); // the rows' width: a row re-fits its name when it changes
   const [rows, setRows] = useState<Map<number, Row>>(new Map());
   // The keyboard cursor is a row (its ref) in one result set: a new search id puts it back on the
   // first row; a refresh under the same id can reorder rows, so the cursor follows its row.
@@ -48,20 +52,25 @@ export function ResultList({ navRef, client, results, openKey, onOpen, onCursor,
   const cursorShown = !!refs?.length && rows.has(refs[active]) && active >= range.start && active < range.end;
   useEffect(() => onCursor(cursorShown ? rowId(active) : ''), [cursorShown, active]);
 
-  useImperativeHandle(navRef, () => ({
-    move: (delta) => {
+  useImperativeHandle(navRef, () => {
+    const move = (delta: number) => {
       if (!refs?.length) return;
       const i = Math.max(0, Math.min(refs.length - 1, active + delta));
       setActive(i);
       reveal(i); // keyboard moves keep the cursor in view (hover only highlights, so it never scrolls)
-    },
-    current: () => {
-      if (!refs?.length) return null;
-      const ref = refs[active];
-      const row = rows.get(ref);
-      return row ? Promise.resolve(row) : client.request('rows', { refs: [ref] }).then(([r]) => r);
-    },
-  }), [client, refs, rows, active, searchId]);
+    };
+    return {
+      move,
+      // One row less than fits, so the row the cursor left stays on screen for context.
+      page: (dir) => move(dir * Math.max(1, Math.floor((scroller.current?.clientHeight ?? 0) / ROW_H) - 1)),
+      current: () => {
+        if (!refs?.length) return null;
+        const ref = refs[active];
+        const row = rows.get(ref);
+        return row ? Promise.resolve(row) : client.request('rows', { refs: [ref] }).then(([r]) => r);
+      },
+    };
+  }, [client, refs, rows, active, searchId]);
 
   /** Scroll just enough to show row i. */
   const reveal = (i: number) => {
@@ -96,7 +105,7 @@ export function ResultList({ navRef, client, results, openKey, onOpen, onCursor,
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const ro = new ResizeObserver(measure);
+    const ro = new ResizeObserver(() => { measure(); setWidth(el.clientWidth); });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -114,7 +123,7 @@ export function ResultList({ navRef, client, results, openKey, onOpen, onCursor,
   for (let i = range.start; refs && i < Math.min(refs.length, range.end); i++) {
     const r = rows.get(refs[i]);
     items.push(r
-      ? <ResultRow key={refs[i]} i={i} total={refs.length} row={r} query={query} active={i === active} open={r.key === openKey} onOpen={onOpen} onHover={setActive} />
+      ? <ResultRow key={refs[i]} i={i} total={refs.length} row={r} query={query} width={width} active={i === active} open={r.key === openKey} onOpen={onOpen} onHover={setActive} />
       : <SkeletonRow key={refs[i]} i={i} />);
   }
 
@@ -139,8 +148,22 @@ const SkeletonRows = () => (
 /** Placeholder list before the search client exists (also the server-rendered state). */
 export const ResultsSkeleton = () => <div class="results" aria-busy="true" aria-label="Search results"><SkeletonRows /></div>;
 
-function ResultRow({ i, total, row, query, active, open, onOpen, onHover }: { i: number; total: number; row: Row; query: string; active: boolean; open: boolean; onOpen: (r: Row) => void; onHover: (i: number) => void }) {
+function ResultRow({ i, total, row, query, width, active, open, onOpen, onHover }: { i: number; total: number; row: Row; query: string; width: number; active: boolean; open: boolean; onOpen: (r: Row) => void; onHover: (i: number) => void }) {
   const tag = row.dup ? row.module : isWarnExtra(sourceOf(row.source), row.extra) ? row.extra : '';
+  const nameRef = useRef<HTMLElement>(null);
+  // A long name is cut at the end. When its first match ends past the cut, the name scrolls so the
+  // match shows with a third of the row after it: the row says why it matched without a tooltip
+  // (none on touch or keyboard), and siblings that share a long matched prefix show their own tails.
+  useLayoutEffect(() => {
+    const el = nameRef.current;
+    if (!el) return;
+    const mark = el.querySelector('mark');
+    const end = mark ? mark.getBoundingClientRect().right - el.getBoundingClientRect().left + el.scrollLeft : 0;
+    const scrolled = end > el.clientWidth;
+    // Chromium paints a scrolled box with an end ellipsis blank, so a scrolled name is clipped instead.
+    el.style.textOverflow = scrolled ? 'clip' : '';
+    el.scrollLeft = scrolled ? end - (el.clientWidth * 2) / 3 : 0; // the browser clamps it to the name's end
+  }, [row.name, query, width]);
   return (
     <div
       id={rowId(i)}
@@ -159,7 +182,7 @@ function ResultRow({ i, total, row, query, active, open, onOpen, onHover }: { i:
     >
       <div class="result-line">
         <span class="source-dot" aria-hidden="true" />
-        <code class="result-name" title={row.name}><Mark text={row.name} q={query} /></code>
+        <code class="result-name" ref={nameRef} title={row.name}><Mark text={row.name} q={query} /></code>
         <span class="result-meta">{tag}</span>
       </div>
       <p class="result-desc">{row.desc || <span class="result-module">{row.module}</span>}</p>
@@ -185,18 +208,24 @@ function locate(name: string, t: string): readonly [number, number] | null {
 
 /** Highlight each query token in a name, tokenised the same way the worker matched it. */
 function Mark({ text, q }: { text: string; q: string }) {
-  // Overlapping tokens: at the same start, the longer one wins.
-  const marks = queryTokens(q)
+  // Overlapping or touching hits merge into one mark covering their union ("get-mg mguser" marks Get-MgUser).
+  const hits = queryTokens(q)
     .map((t) => locate(text, t))
     .filter((m) => m !== null)
-    .sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+    .map(([at, len]) => [at, at + len])
+    .sort((a, b) => a[0] - b[0]);
+  const spans: number[][] = [];
+  for (const [start, end] of hits) {
+    const last = spans[spans.length - 1];
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else spans.push([start, end]);
+  }
   const out = [];
   let pos = 0;
-  for (const [at, len] of marks) {
-    if (at < pos) continue;
-    if (at > pos) out.push(text.slice(pos, at));
-    out.push(<mark key={at}>{text.slice(at, at + len)}</mark>);
-    pos = at + len;
+  for (const [start, end] of spans) {
+    if (start > pos) out.push(text.slice(pos, start));
+    out.push(<mark key={start}>{text.slice(start, end)}</mark>);
+    pos = end;
   }
   out.push(text.slice(pos));
   return <>{out}</>;

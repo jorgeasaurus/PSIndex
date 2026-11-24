@@ -184,10 +184,10 @@ export class AsciiField {
   }
 }
 
-/** Multiply each RGB channel of a #rrggbb colour by k. */
 /** A source colour as the field draws it in a theme: darker glyphs on the light ground. */
 const tone = (hex: string, theme: Theme) => ({ color: theme === 'light' ? scaleHex(hex, 0.62) : hex, dim: theme === 'light' ? 0.85 : 0.78 });
 
+/** Multiply each RGB channel of a #rrggbb colour by k. */
 function scaleHex(hex: string, k: number) {
   const n = parseInt(hex.slice(1), 16);
   return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * k).toString(16).padStart(2, '0')).join('');

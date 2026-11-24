@@ -38,29 +38,46 @@ dist/                 static site, plus a /mcp function, deployed by Vercel on e
 
 Agents can query this index over the [Model Context Protocol](https://modelcontextprotocol.io) Streamable HTTP transport at `https://psindex.vercel.app/mcp`. The endpoint is stateless and read-only, and it does not require authentication. `search_cmdlets` returns names, modules, short descriptions, and page URLs; `get_cmdlet` returns the syntax, parameters, and the rest of an entry; `list_modules` lists modules.
 
-Cursor, Claude, and VS Code accept the same shape:
+Each client spells the config differently (the site's info panel gives the same setups):
 
-```json
-{
-  "mcpServers": {
-    "psindex": {
-      "url": "https://psindex.vercel.app/mcp"
-    }
-  }
-}
-```
+- **Cursor**, `~/.cursor/mcp.json` or `.cursor/mcp.json` (top-level key `mcpServers`, no `type`):
+
+  ```json
+  { "mcpServers": { "psindex": { "url": "https://psindex.vercel.app/mcp" } } }
+  ```
+
+- **VS Code**, `.mcp.json` at the workspace root, or `~/.copilot/mcp-config.json` for every workspace (top-level key `mcpServers`, `type` `http`). `.vscode/mcp.json` with a `servers` key is the deprecated Local harness format, which the Copilot harness does not read:
+
+  ```json
+  { "mcpServers": { "psindex": { "type": "http", "url": "https://psindex.vercel.app/mcp" } } }
+  ```
+
+- **Claude Code**, `.mcp.json` in the project (top-level key `mcpServers`, `type` `http`; an entry without `type` is read as stdio), or `claude mcp add --transport http psindex https://psindex.vercel.app/mcp`:
+
+  ```json
+  { "mcpServers": { "psindex": { "type": "http", "url": "https://psindex.vercel.app/mcp" } } }
+  ```
+
+- **Claude Desktop and claude.ai** take a remote server as a custom connector (Customize → Connectors → Add custom connector, with the URL above and no sign-in). `claude_desktop_config.json` holds local servers only.
 
 ## Develop
+
+Needs Node >= 22.6: the index script runs TypeScript with `--experimental-strip-types`, and `.npmrc` sets `engine-strict`, so `npm install` refuses an older Node.
 
 ```bash
 npm install
 npm run dev        # builds the index, then starts Astro on http://localhost:4321
 npm run build      # index, then the site. On Vercel this also bundles /mcp
+npm run preview    # serves the built site and /mcp together on http://localhost:4321 (run build first)
 npm run typecheck  # tsc (run after build or index, which generates src/sources.generated.json)
 npm run test:e2e   # browser checks against the built site (needs Playwright + Chromium)
 npm run test:mcp   # HTTP checks for /mcp against the built server
-npm run verify     # build, typecheck, browser checks, and the MCP checks: the gate CI runs
+npm run test:pipelines  # unit tests for the docs parsers (Python 3, standard library only)
+npm run test:clean-text # the index build's text cleaning (literal escapes, Windows and UNC paths)
+npm run verify     # the gate CI runs: build, typecheck, playwright install, browser checks, MCP checks, pipeline and text-cleaning tests
 ```
+
+`npm run verify` runs `playwright install --with-deps chromium`, which downloads Chromium and installs its system libraries with the OS package manager (apt, through sudo on a developer machine). Where those libraries are already present, run `npm run build && npm run typecheck && npm run test:e2e && npm run test:mcp && npm run test:pipelines && npm run test:clean-text` instead.
 
 ## Refresh data locally
 
@@ -71,7 +88,7 @@ bash pipelines/refresh.sh mecm
 python3 scripts/check-shrink.py mecm   # refuses a refresh that lost more than 10% of its entries
 ```
 
-`.github/workflows/update-data.yml` runs the same script daily for every source, or on demand from the Actions tab (input `sources`: `all` or e.g. `graph,mecm`). A new source needs `pipelines/<id>/` (a `parse_docs.py` and a `source.env`), its `data/<id>/`, and an entry in `SOURCES` in `scripts/build-index.ts`; the build fails if those three disagree.
+`.github/workflows/update-data.yml` runs the same script daily for every source, or on demand from the Actions tab (input `sources`: `all`, or ids separated by commas or spaces, e.g. `graph,mecm` or `graph mecm`). A new source needs `pipelines/<id>/` (a `parse_docs.py` and a `source.env`), its `data/<id>/`, and an entry in `SOURCES` in `scripts/build-index.ts`; the build fails if those three disagree.
 
 A parser that finds no cmdlets fails the run. A source's version is the one found this run, else the last committed one (with a warning), else the run fails (`pipelines/common.py` `source_version`).
 

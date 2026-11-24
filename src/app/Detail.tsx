@@ -13,7 +13,7 @@ interface Props {
   client: SearchClient;
   onOpen: (r: Row) => void;
   onClose: () => void;
-  /** Move focus to the entry's title when it opens (the narrow-screen dialog). */
+  /** The entry is the narrow-screen dialog: its title takes focus when it opens or the window narrows. */
   takeFocus: boolean;
 }
 
@@ -22,11 +22,12 @@ export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
   const src = sourceOf(row.source);
   const title = useRef<HTMLHeadingElement>(null);
 
-  // Focus the title when the entry is a dialog, or when the control that opened it is gone
-  // (a "Same noun" button belongs to the entry it replaces): focus would otherwise drop to <body>.
+  // Focus the title when the entry becomes a dialog (opened narrow, or the window narrowed: the
+  // control that had focus is now inert), or when the control that opened it is gone (a "Same noun"
+  // button belongs to the entry it replaces): focus would otherwise drop to <body>.
   useEffect(() => {
     if (takeFocus || document.activeElement === document.body) title.current?.focus({ preventScroll: true });
-  }, []);
+  }, [takeFocus]);
 
   useEffect(() => {
     let live = true;
@@ -61,7 +62,8 @@ export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
 
       {related.length > 0 && (
         <section class="block">
-          <h3>Same noun · {row.name.slice(row.name.indexOf('-') + 1)}</h3>
+          {/* One flex item, so the noun's <wbr>s wrap it instead of each piece becoming an item. */}
+          <h3><span>Same noun · {breakable(row.name.slice(row.name.indexOf('-') + 1))}</span></h3>
           <ul class="related">
             {related.map((r) => (
               <li key={r.key}>
@@ -101,7 +103,7 @@ function CmdletEntry({ row, onRetry }: { row: Row; onRetry: () => void }) {
   }, [row.key, attempt]);
 
   switch (state.status) {
-    case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
+    case 'loading': return <div class="detail-skel" role="status"><span class="sr-only">Loading details</span><i /><i /><i /><i /></div>;
     case 'failed': return (
       <div class="notice notice-error" role="alert">
         <p>Couldn’t load the details. {state.error.message}</p>
@@ -120,8 +122,8 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
     return { sets: syntax.sets, params: withDocumented(syntax.params, c.parameters) };
   }, [c]);
   const [showCommon, setShowCommon] = useState(false);
+  const common = params.filter((p) => isCommonParam(p.name));
   const visible = showCommon ? params : params.filter((p) => !isCommonParam(p.name));
-  const hidden = params.length - visible.length;
   const examples = c.examples;
   const perms = c.permissions;
   return (
@@ -143,16 +145,17 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
             <tbody>
               {visible.map((p) => (
                 <tr key={p.name}>
-                  <td><code class="t-param">-{p.name}</code>{p.description ? <p class="param-desc">{p.description}</p> : null}</td>
+                  <td><code class="t-param">{paramName(p.name)}</code>{p.description ? <p class="param-desc">{p.description}</p> : null}</td>
                   <td><code class="t-type">{breakable(p.type)}</code></td>
                   <td>{p.required ? <span class="tag tag-req">Required</span> : p.positional ? <span class="tag">Positional</span> : null}</td>
                 </tr>
               ))}
             </tbody>
           </table>}
-          {(hidden > 0 || showCommon) && (
+          {common.length > 0 && (
+            // Named, so an admin looking for -WhatIf knows it is here.
             <button type="button" class="link-btn" aria-expanded={showCommon} onClick={() => setShowCommon((s) => !s)}>
-              {showCommon ? 'Hide' : `Show ${hidden}`} pipeline and proxy parameters
+              {showCommon ? 'Hide' : 'Show'} {common.length} common parameter{common.length === 1 ? '' : 's'} ({common.map((p) => '-' + p.name).join(', ')})
             </button>
           )}
         </section>
@@ -168,15 +171,28 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
 
       <section class="block">
         <h3>Examples</h3>
-        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} label={`Copy example ${i + 1}`} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
+        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} label={`Copy example ${i + 1}`} />) : <p class="h-sub">{noExample(sets.length > 0, params.length > 0)}</p>}
       </section>
     </>
   );
 }
 
-const renderTokens = (s: string) => tokenize(s).map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>));
+/** The no-example note points only to sections the entry has. */
+const noExample = (syntax: boolean, params: boolean) =>
+  syntax ? 'The docs have no example for this cmdlet. Start from the syntax above.'
+    : params ? 'The docs have no example for this cmdlet. Start from the parameters above.'
+      : 'The docs have no syntax or example for this cmdlet.';
 
-/** One parameter set: each top-level group is a non-wrapping unit, so lines only break between parameters. */
+/** Names and types get word-boundary breaks, so a long one wraps readably when it must. */
+const renderTokens = (s: string) => tokenize(s).map((t, i) => (
+  t.t === 'txt' ? t.v
+    : <span key={i} class={'t-' + t.t}>{t.t === 'param' ? paramName(t.v.slice(1)) : t.t === 'cmd' || t.t === 'type' ? breakable(t.v) : t.v}</span>
+));
+
+/**
+ * One parameter set. Each top-level group moves to the next line whole when it fits there, and
+ * wraps between its words only when it is wider than the box (global.css .sg).
+ */
 function SyntaxBlock({ groups, label }: { groups: string[]; label: string }) {
   const body = useMemo(() => groups.flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderTokens(g)}</span>]), [groups]);
   return <CodeFrame copy={groups.join(' ')} label={label} syntax>{body}</CodeFrame>;
@@ -206,8 +222,22 @@ function breakable(s: string) {
   return parts.flatMap((p, i) => (i ? [<wbr key={i} />, p] : [p]));
 }
 
-/** A category tag adds nothing when the module name already says it ("Groups" for Microsoft.Graph.Groups, "Teams" for MicrosoftTeams). */
-const showsCategory = (row: Row) => !!row.category && !row.module.toLowerCase().includes(row.category.toLowerCase().replace(/\s+/g, ''));
+/**
+ * "-Name" breakable like other names, with the "-" held to the first word: a browser may break
+ * after a hyphen, which would leave "-" (or "[-") at a line end, apart from its name.
+ */
+function paramName(name: string) {
+  const [first, ...rest] = breakable(name);
+  return [<span key="h" class="nb">-{first}</span>, ...rest];
+}
+
+/**
+ * A category tag adds nothing when the module name already says it ("Groups" for Microsoft.Graph.Groups,
+ * "Teams" for MicrosoftTeams), or when it is a catch-all ("Other", "General", "Exchange General").
+ */
+const FILLER_CATEGORY = /^(other|(.+\s)?general)$/i;
+const showsCategory = (row: Row) => !!row.category && !FILLER_CATEGORY.test(row.category)
+  && !row.module.toLowerCase().includes(row.category.toLowerCase().replace(/\s+/g, ''));
 
 /** A module's own version, when it says more than its source's (Teams 8.1.0 under Exchange 3.9.2; each Az.* module). */
 const showsModuleVersion = (row: Row, src: SourceMeta) => !!row.moduleVersion && row.moduleVersion !== src.version;

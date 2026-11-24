@@ -147,16 +147,101 @@ def gallery_dependencies(package, version, source_id):
     return previous_module_versions(source_id)
 
 
+# Emphasis markup around a run of text: *a*, **a**, _a_, __a__ and `code`. A '_' or '*' inside a
+# word, between spaces or escaped ("Standard_AzureFrontDoor", "2 * 3", "Standard\_Azure") is text.
+EMPHASIS_RE = re.compile(r"(?<![\w*\\])(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=[^\s\\])\1(?![\w*])|`([^`]+)`")
+LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+ESCAPE_RE = re.compile(r"\\([\\`*_\[\]])")
+
+
+def clean_synopsis(text):
+    """Synopsis text as plain text: links become their text, emphasis loses its markup (nested
+    emphasis too, "**_a_**") and markdown escapes ("Standard\\_AzureFrontDoor") their backslash."""
+    text = LINK_RE.sub(r"\1", text)
+    while True:
+        plain = EMPHASIS_RE.sub(lambda m: m.group(2) if m.group(3) is None else m.group(3), text)
+        if plain == text:
+            break
+        text = plain
+    return ESCAPE_RE.sub(r"\1", text).strip()
+
+
+def synopsis_from(section):
+    """A SYNOPSIS section's description: its first paragraph as plain text. Callouts the docs
+    open it with ("> [!NOTE]", "> [!IMPORTANT]", any "> " block) are not the description."""
+    lines = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(">"):
+            continue
+        if not stripped:
+            if lines:
+                break
+            continue
+        lines.append(stripped)
+    return clean_synopsis(" ".join(lines))
+
+
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})\s*([^\s`]*)")
+
+
+def fenced_blocks(section):
+    """(language, code) for each fenced code block of a markdown section, in order.
+
+    Fences are read line by line, so a closing fence is never taken for an opening one, and a
+    block ends only at a fence of its own character at least as long as the one that opened it.
+    The language is the info string, lower-cased ('' for an unlabelled block). A block still
+    open when the section ends runs to its end, as CommonMark runs it to the end of its container.
+    """
+    fence = lang = None
+    body = []
+    for line in section.splitlines():
+        if fence is None:
+            m = FENCE_RE.match(line)
+            if m:
+                fence, lang, body = m.group(1), m.group(2).lower(), []
+            continue
+        if line.strip().startswith(fence) and not line.strip().strip(fence[0]):
+            yield lang, "\n".join(body)
+            fence = None
+            continue
+        body.append(line)
+    if fence is not None:
+        yield lang, "\n".join(body)
+
+
 def syntax_from(section):
     """Every parameter set in a SYNTAX section: the docs give one fenced code block per set.
 
     The sets are joined by a blank line; the site splits them again at each line starting with
     the cmdlet name. Comment lines ("# ParameterSetName") are dropped.
     """
-    blocks = re.findall(r"```[^\n]*\n(.*?)```", section, re.DOTALL)
-    # Some docs label a set with a "# ..." comment line; the set itself starts at the cmdlet name.
-    sets = ["\n".join(l for l in b.splitlines() if not l.lstrip().startswith("#")).strip() for b in blocks]
+    sets = ["\n".join(l for l in code.splitlines() if not l.lstrip().startswith("#")).strip() for _, code in fenced_blocks(section)]
     return "\n\n".join(s for s in sets if s)
+
+
+# Info strings the docs use for PowerShell; an unlabelled block is code too. "Output", "json",
+# "yaml" and other blocks are skipped.
+POWERSHELL_LANGS = {"", "powershell", "pwsh", "ps", "ps1", "posh"}
+# A console prompt ("PS>", "PS C:\>", "PS /home/user>") is not part of the command to copy.
+PROMPT_RE = re.compile(r"^PS(?:[ \t][^>\n]*)?>[ \t]*", re.MULTILINE)
+# How many examples a cmdlet keeps; the detail pane shows them all.
+MAX_EXAMPLES = 3
+
+
+def examples_from(section, limit=MAX_EXAMPLES):
+    """The PowerShell code blocks of an EXAMPLES section, at most `limit` of them (None: all).
+
+    The code is kept as written, comments and <# #> blocks included, without its prompt.
+    """
+    examples = []
+    for lang, code in fenced_blocks(section):
+        code = PROMPT_RE.sub("", code).strip()
+        if lang in POWERSHELL_LANGS and code:
+            examples.append(code)
+            if len(examples) == limit:
+                break
+    return examples
 
 
 def require_cmdlets(source_id, count):

@@ -10,18 +10,17 @@ and produces:
 Usage:
     bash pipelines/refresh.sh entra   (writes data/entra/ via $PSINDEX_OUT)
 
-docs_dir defaults to ./docs and should point to the directory containing
-entra-powershell-v1.0/ and entra-powershell-beta/ subdirectories.
+The docs directory argument is the one containing the entra-powershell-v1.0/ and
+entra-powershell-beta/ subdirectories.
 """
 
 import json
-import os
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-from common import gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
+from common import examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, synopsis_from, syntax_from
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -37,7 +36,6 @@ CATEGORY_MAP = [
     ("Users", "User Management"),
 ]
 
-MAX_EXAMPLES = 3
 
 
 def get_category(module_name: str) -> str:
@@ -75,29 +73,6 @@ def extract_section(text: str, heading: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def extract_synopsis(section: str) -> str:
-    """Get the first paragraph from SYNOPSIS, skipping NOTE blocks."""
-    lines = []
-    in_note = False
-    for line in section.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("> [!NOTE]") or stripped.startswith("> [!TIP]"):
-            in_note = True
-            continue
-        if in_note:
-            if stripped.startswith(">"):
-                continue
-            if not stripped:
-                in_note = False
-                continue
-            in_note = False
-        if not stripped and lines:
-            break
-        if stripped:
-            lines.append(stripped)
-    return " ".join(lines)
-
-
 def extract_permissions(section: str) -> list:
     """Parse permission names from the permissions table in DESCRIPTION."""
     permissions = set()
@@ -124,24 +99,6 @@ def extract_permissions(section: str) -> list:
         elif in_table and not stripped.startswith("|"):
             break
     return sorted(permissions)
-
-
-def extract_examples(section: str) -> list:
-    """Extract up to MAX_EXAMPLES code blocks from EXAMPLES section."""
-    examples = []
-    for m in re.finditer(r"```(?:powershell)?\s*\n(.*?)```", section, re.DOTALL):
-        code = m.group(1).strip()
-        # Strip PS C:\> prompts
-        lines = []
-        for line in code.splitlines():
-            cleaned = re.sub(r"^PS\s+C:\\>\s*", "", line)
-            lines.append(cleaned)
-        code = "\n".join(lines).strip()
-        if code:
-            examples.append(code)
-        if len(examples) >= MAX_EXAMPLES:
-            break
-    return examples
 
 
 def is_cmdlet_file(filepath, text):
@@ -186,7 +143,7 @@ def parse_cmdlet_file(filepath, module_name, api_version):
 
     # SYNOPSIS -> description
     synopsis_section = extract_section(text, "SYNOPSIS")
-    description = extract_synopsis(synopsis_section)
+    description = synopsis_from(synopsis_section)
     if not description:
         description = "Microsoft Entra PowerShell cmdlet."
 
@@ -202,7 +159,7 @@ def parse_cmdlet_file(filepath, module_name, api_version):
 
     # EXAMPLES -> code blocks
     examples_section = extract_section(text, "EXAMPLES")
-    examples = extract_examples(examples_section)
+    examples = examples_from(examples_section)
 
     verb = cmdlet_name.split("-")[0] if "-" in cmdlet_name else ""
 
@@ -245,13 +202,12 @@ def scan_version_dir(version_dir: Path, api_version: str) -> list:
 
 
 def main():
-    docs_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./docs")
-
+    if len(sys.argv) < 2:
+        sys.exit("Usage: parse_docs.py <entra-powershell-docs docs dir>  (run through pipelines/refresh.sh entra)")
+    data_dir = output_dir()  # checked before the docs path, like every parser
+    docs_dir = Path(sys.argv[1])
     if not docs_dir.is_dir():
-        print(f"Error: docs directory not found: {docs_dir}", file=sys.stderr)
-        sys.exit(1)
-
-    data_dir = output_dir()
+        sys.exit(f"::error::entra: docs directory not found: {docs_dir}")
     modules_dir = data_dir / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 

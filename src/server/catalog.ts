@@ -1,14 +1,16 @@
-// Reads the artifacts scripts/build-index.ts writes under public/a/<build>/. The page fetches
-// those same files; this process reads them from disk because a Vercel function cannot see the
-// deployment's static files. Shards stay in memory after the first call. Module files are read
-// only when a cmdlet is opened, as the page does.
+// Reads the artifacts scripts/build-index.ts writes under public/a/<build>/, from the copy the
+// build ships (dist/client/a/<build>/). The page fetches those same files; this process reads
+// them from disk because a Vercel function cannot see the deployment's static files. Shards stay
+// in memory after the first call. Module files are read only when a cmdlet is opened, as the
+// page does.
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build, publicDir } from 'astro:config/server';
 import { artifactPath } from '../app/artifacts';
 import { parseSyntax, withDocumented } from '../app/powershell';
-import { prepareSource, rowOf, rowsNamed, searchHits, setDescriptions, type Loaded } from '../app/search-core';
+import { prepareSource, rowOf, rowsNamed, searchHits, setDescriptions, type Loaded, descriptionsOf } from '../app/search-core';
 import { SOURCES, queryTokens } from '../app/sources';
 import type { CmdletFile, IndexShard, Row } from '../app/types';
 import { EMPTY_FILTERS } from '../app/url';
@@ -37,30 +39,32 @@ export type ToolResult<T> = { ok: true; data: T } | { ok: false; message: string
 
 let artifactDir: string | null = null;
 
-/** Directory of this build's artifacts. The function bundle and a local preview keep them in different places. */
+/**
+ * Directory of this build's artifacts: a/<build>/ inside the directory the site serves its static
+ * files from. In dev that is public/. In a build it is build.client, found the way @astrojs/node
+ * finds it: walk up from this chunk to the build.server folder and apply the build-time path
+ * from build.server to build.client. That holds for dist/ copied anywhere and for the Vercel
+ * function, which carries dist/client/a/<build>/ at the same place relative to its server folder.
+ */
 function artifactRoot(): string {
   if (artifactDir) return artifactDir;
-  const rel = join('public', 'a', BUILD);
-  const starts = [process.cwd()];
-  try {
+  let staticDir: string;
+  if (import.meta.env.DEV) {
+    staticDir = fileURLToPath(publicDir);
+  } else {
+    const serverName = basename(fileURLToPath(build.server));
     let dir = dirname(fileURLToPath(import.meta.url));
-    for (let i = 0; i < 8; i++) {
-      starts.push(dir);
+    while (basename(dir) !== serverName) {
       const parent = dirname(dir);
-      if (parent === dir) break;
+      if (parent === dir) throw new Error(`No "${serverName}" folder above ${fileURLToPath(import.meta.url)}`);
       dir = parent;
     }
-  } catch { /* a bundled module URL that is not a file path */ }
-  const tried: string[] = [];
-  for (const start of starts) {
-    const candidate = join(start, rel);
-    tried.push(candidate);
-    if (existsSync(join(candidate, 'idx'))) {
-      artifactDir = candidate;
-      return candidate;
-    }
+    staticDir = join(dir, relative(fileURLToPath(build.server), fileURLToPath(build.client)));
   }
-  throw new Error(`Cmdlet index ${BUILD} is not on disk (${tried[0]})`);
+  const candidate = join(staticDir, 'a', BUILD);
+  if (!existsSync(join(candidate, 'idx'))) throw new Error(`Cmdlet index ${BUILD} is not on disk (${candidate})`);
+  artifactDir = candidate;
+  return candidate;
 }
 
 async function readJson<T>(rel: string): Promise<T> {
@@ -137,10 +141,10 @@ function hit(origin: string, row: Row): CmdletHit {
   };
 }
 
-export async function searchCmdlets(origin: string, query: string, module: string | undefined, limit: number): Promise<ToolResult<{ results: CmdletHit[]; truncated: boolean }>> {
+export async function searchCmdlets(origin: string, query: string, module: string | undefined, limit: number): Promise<ToolResult<{ results: CmdletHit[]; truncated: boolean; namesOnly: string[] }>> {
   // The site lists every cmdlet for an empty box. A query of only punctuation has no tokens
   // (queryTokens), and the ranker would do the same. That is not a search.
-  if (!queryTokens(query).length) return { ok: false, message: 'Query needs a letter or digit. Punctuation alone matches nothing.' };
+  if (!queryTokens(query).length) return { ok: false, message: 'Query needs a word with an ASCII letter or digit: cmdlet names are ASCII, so punctuation, other scripts or parameters alone (-All) match nothing.' };
   const all = await loadIndex();
   let canonical = '';
   if (module) {
@@ -153,6 +157,9 @@ export async function searchCmdlets(origin: string, query: string, module: strin
     data: {
       results: hits.slice(0, limit).map((h) => hit(origin, rowOf(all, h.ref))),
       truncated: hits.length > limit,
+      // Sources whose descriptions did not load: only names matched there, so an empty result
+      // does not mean no cmdlet fits (the site shows a notice in the same case).
+      namesOnly: descriptionsOf(all).failed,
     },
   };
 }

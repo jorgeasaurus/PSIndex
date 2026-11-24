@@ -4,8 +4,8 @@ import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { McpPanel } from './mcp-panel';
-import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, srcStyle } from './sources';
-import type { Descriptions, Facets, Filters, SourceId } from './types';
+import { ALL, SOURCES, SOURCE_NAMES, TOTAL, cmdletNameIn, formatCount, formatList, queryWords, sourceOf, srcStyle } from './sources';
+import type { Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
 export function Frame({ source, isOpen, dialog, inert, canvasRef, detailRef, band, toolbar, results, detail }: {
@@ -59,14 +59,19 @@ function caretPoint(el: HTMLInputElement) {
   return { x: Math.min(r.right - 24, x), y: r.top + r.height / 2 };
 }
 
-export function Band({ q, source, placeholder, inputRef, handlers, live, activeId, inert, dark }: {
+export function Band({ q, source, placeholder, inputRef, handlers, live, expanded, activeId, inert, dark }: {
   q: string;
   source: SourceId;
   placeholder: string;
   inputRef: Ref<HTMLInputElement>;
   handlers: BandHandlers;
-  /** False for the server-rendered shell: the box is read-only until the search session can act on input. */
+  /**
+   * False for the server-rendered shell and after a failed index load: the box is read-only, and
+   * nothing that would change the search (tabs, clear) is offered.
+   */
   live: boolean;
+  /** The results list has options (the combobox's popup is open). */
+  expanded: boolean;
   /** id of the result row under the keyboard cursor ('' for none), for assistive tech. */
   activeId: string;
   /** Behind the narrow-screen detail dialog. */
@@ -108,31 +113,50 @@ export function Band({ q, source, placeholder, inputRef, handlers, live, activeI
           autoComplete="off"
           role="combobox"
           list={undefined /* no datalist: the results list is the popup (aria-controls) */}
-          aria-expanded={live}
+          aria-expanded={expanded}
           aria-autocomplete="list"
           aria-label="Search cmdlets"
-          aria-controls={live ? 'results' : undefined}
+          aria-controls={expanded ? 'results' : undefined}
           aria-activedescendant={activeId || undefined}
           placeholder={placeholder}
           onInput={(e) => { const el = e.target as HTMLInputElement; onQuery(el.value, caretPoint(el)); }}
           onKeyDown={onKeyDown}
         />
-        {q ? (
+        {q && live ? (
           <button class="icon-btn searchbox-clear" type="button" aria-label="Clear search" onClick={onClear}><X size={16} /></button>
-        ) : (
+        ) : live ? (
           <kbd class="searchbox-kbd" aria-hidden="true">/</kbd>
-        )}
+        ) : null}
       </div>
 
-      <nav class="sources" aria-label="Source">
-        <SourceTab id={ALL.id} label="All" count={TOTAL} current={source} onPick={onPickSource} />
-        {SOURCES.map((s) => <SourceTab key={s.id} id={s.id} label={s.short} count={s.count} current={source} onPick={onPickSource} />)}
-      </nav>
+      <SourceStrip>
+        <SourceTab id={ALL.id} label="All" count={TOTAL} current={source} disabled={!live} onPick={onPickSource} />
+        {SOURCES.map((s) => <SourceTab key={s.id} id={s.id} label={s.short} count={s.count} current={source} disabled={!live} onPick={onPickSource} />)}
+      </SourceStrip>
     </header>
   );
 }
 
-function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label: string; count: number; current: SourceId; onPick: (s: SourceId) => void }) {
+/**
+ * The tab strip. On narrow screens it scrolls sideways, and `data-more` marks that tabs lie past its
+ * right edge (the CSS fades that edge). Set on the element directly: it follows scrolling, not the render.
+ */
+function SourceStrip({ children }: { children: ComponentChildren }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ref.current!;
+    const mark = () => el.toggleAttribute('data-more', Math.ceil(el.scrollLeft + el.clientWidth) < el.scrollWidth);
+    mark();
+    el.addEventListener('scroll', mark, { passive: true });
+    // The strip's own size, and its tabs' (a late web font widens them).
+    const sizes = new ResizeObserver(mark);
+    for (const c of [el, ...el.children]) sizes.observe(c);
+    return () => { el.removeEventListener('scroll', mark); sizes.disconnect(); };
+  }, []);
+  return <nav ref={ref} class="sources" aria-label="Source">{children}</nav>;
+}
+
+function SourceTab({ id, label, count, current, disabled, onPick }: { id: SourceId; label: string; count: number; current: SourceId; disabled: boolean; onPick: (s: SourceId) => void }) {
   const on = id === current;
   const ref = useRef<HTMLButtonElement>(null);
   // The tab strip scrolls sideways on narrow screens; keep the selected tab in view.
@@ -141,7 +165,9 @@ function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label:
   useEffect(() => { if (on) centre(); }, [on]);
   return (
     // A tab reached by keyboard is centred too: at the strip's edge it would sit under the fade.
-    <button ref={ref} type="button" onFocus={centre} class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
+    // Only by keyboard (:focus-visible): a tap focuses on press, and scrolling then would move
+    // another tab under the finger before the release, so the tap would select nothing.
+    <button ref={ref} type="button" disabled={disabled} onFocus={() => ref.current?.matches(':focus-visible') && centre()} class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
       <span class="source-dot" aria-hidden="true" />
       {label}
       <span class="source-n">{formatCount(count)}</span>
@@ -188,36 +214,78 @@ export function FilterBar({ facets, filters, extraLabel, setFilter, clear }: {
 }
 
 function Select({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
+  // Facet values match in any case (?verb=get filters on Get), here as in the search.
+  const selected = (value && options.find((o) => o.toLowerCase() === value.toLowerCase())) || value;
   return (
     <label class="select">
       <span>{label}</span>
-      <select value={value} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>
+      <select value={selected} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>
         <option value="">Any</option>
         {/* An active value this scope doesn't have (a stale link, a verb carried over from another source): still shown, so it can be cleared. */}
-        {value && !options.includes(value) && <option value={value}>{value} (none here)</option>}
+        {selected && !options.includes(selected) && <option value={selected}>{selected} (none here)</option>}
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </label>
   );
 }
 
-export function EmptyState({ q, inLabel, filtered, descriptions, reset }: { q: string; inLabel: string; filtered: boolean; descriptions: Descriptions; reset: () => void }) {
+/**
+ * No results. `q` is the query ('' when it has no token). The hint comes from what was typed: a
+ * command line pasted with its parameters or a pipeline offers its cmdlet name alone, a lone cmdlet name its
+ * noun, several words fewer. When the query does match, only in cmdlets the filters hide (`hidden`),
+ * the filters are named as the reason instead. No `onClearFilters`/`onSearchAll`: no filters are
+ * set, or the scope is already every source.
+ */
+export function EmptyState({ q, inLabel, hidden, descriptionsLoading, onSearch, onClearFilters, onSearchAll }: {
+  q: string;
+  inLabel: string;
+  hidden: number;
+  descriptionsLoading: boolean;
+  onSearch: (q: string) => void;
+  onClearFilters?: () => void;
+  onSearchAll?: () => void;
+}) {
+  const clearFilters = onClearFilters && <button type="button" class="chip" onClick={onClearFilters}>Clear filters</button>;
+  if (q && hidden) return (
+    <div class="empty">
+      <p class="empty-title">“{q}” matches {formatCount(hidden)} {hidden === 1 ? 'cmdlet' : 'cmdlets'}{inLabel}, but the filters hide {hidden === 1 ? 'it' : 'them all'}.</p>
+      {clearFilters}
+    </div>
+  );
   // Descriptions load after names; until then a query that only a description matches finds nothing yet.
-  if (q && descriptions === 'loading') return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
+  if (q && descriptionsLoading) return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
+  const words = queryWords(q);
+  const name = cmdletNameIn(words);
+  const suggest = (text: string) => <button type="button" class="chip" onClick={() => onSearch(text)}>Search <code>{text}</code></button>;
   return (
     <div class="empty">
       <p class="empty-title">{q ? <>No match for “{q}”{inLabel}.</> : 'Nothing matches these filters.'}</p>
-      {q && <p>Try the noun alone (<code>MgUser</code> instead of <code>Get-MgUser</code>), or fewer words.</p>}
-      {filtered && <button type="button" class="chip" onClick={reset}>Search all cmdlets</button>}
+      {name && name !== words.join(' ') ? <><p>A search matches cmdlet names, not whole command lines. Search the cmdlet name alone:</p>{suggest(name)}</>
+        : name ? <><p>Try the noun alone:</p>{suggest(name.slice(name.indexOf('-') + 1))}</>
+        : words.length > 1 && <p>Try fewer words.</p>}
+      {clearFilters}
+      {onSearchAll && <button type="button" class="chip" onClick={onSearchAll}>Search all cmdlets</button>}
     </div>
   );
 }
 
-/** Shown while a scope's descriptions failed to load: results come from names alone. */
-export function DescriptionsFailed() {
+/**
+ * A query of parameters alone ("-All") searches nothing, so every cmdlet is listed as for an empty
+ * box: say why, so the full list is not read as matching the parameter.
+ */
+export function ParametersNotSearched({ words }: { words: string[] }) {
+  return (
+    <div class="notice notice-link" role="status">
+      <p>Parameters such as <code>{words[0]}</code> aren’t searched: cmdlets are found by name and description. Type part of a cmdlet name.</p>
+    </div>
+  );
+}
+
+/** Shown while some sources' descriptions failed to load: those sources are searched by name alone. */
+export function DescriptionsFailed({ sources }: { sources: SourceId[] }) {
   return (
     <div class="notice notice-error notice-link" role="status">
-      <p>Descriptions didn’t load, so only cmdlet names are searched.</p>
+      <p>{formatList(sources.map((id) => sourceOf(id).short))} descriptions didn’t load, so only {sources.length > 1 ? 'their' : 'its'} cmdlet names are searched.</p>
       <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
     </div>
   );
@@ -233,14 +301,24 @@ export function LoadFailed({ message }: { message: string }) {
   );
 }
 
-/** No `onPick` (the shell, a failed load): the example searches can't run, so they aren't offered. */
-export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void }) {
+/**
+ * No `onPick` (the shell, a failed load): the example searches can't run, so they aren't offered,
+ * and neither is the key legend (no key acts on a search that can't run).
+ */
+/**
+ * What the site is for, shown until there is something to look at: in the detail pane on wide
+ * screens, and `compact` above the results on narrow ones (no sources table or key legend there).
+ */
+export function Intro({ onPick, compact }: { onPick?: (s: SourceId, q: string) => void; compact?: boolean }) {
   return (
-    <div class="intro">
-      <h2>Type a fragment. Get the command.</h2>
+    <div class={'intro' + (compact ? ' intro-compact' : '')}>
+      <h2>Look up any Microsoft PowerShell cmdlet.</h2>
       <p class="intro-lede">
-        {formatCount(TOTAL)} cmdlets from {SOURCES.length} Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
+        PSIndex searches {formatCount(TOTAL)} cmdlets from {SOURCE_NAMES} in one place, with each one’s
+        syntax, parameters, examples and required permissions from the Microsoft docs. Type part of a name or what you want to
+        do, then pick a result.{compact ? null : ' It all runs in your browser.'}
       </p>
+      {onPick && <p class="intro-try">Try:</p>}
       {onPick && <ul class="intro-samples" aria-label="Example searches">
         {SOURCES.map((s) => (
           <li key={s.id}>
@@ -250,15 +328,15 @@ export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void })
           </li>
         ))}
       </ul>}
-      <dl class="intro-sources">
+      {!compact && <dl class="intro-sources">
         {SOURCES.map((s) => (
           <div key={s.id} style={srcStyle(s.id)}>
             <dt><span class="source-dot" aria-hidden="true" />{s.label}</dt>
             <dd>{formatCount(s.count)}<span> · v{s.version}</span></dd>
           </div>
         ))}
-      </dl>
-      <p class="intro-keys"><kbd>/</kbd> search <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>
+      </dl>}
+      {onPick && !compact && <p class="intro-keys"><kbd>/</kbd> search <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>}
     </div>
   );
 }

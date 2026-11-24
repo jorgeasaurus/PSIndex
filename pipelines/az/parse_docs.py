@@ -11,13 +11,12 @@ Output:
     $PSINDEX_OUT/modules/Az.<Module>.json
 """
 
-import os
 import re
 import json
 import sys
 from pathlib import Path
 
-from common import gallery_dependencies, output_dir, require_cmdlets, source_version, syntax_from
+from common import examples_from, gallery_dependencies, gallery_module_versions, output_dir, require_cmdlets, source_version, synopsis_from, syntax_from
 
 # ── Category mapping ──────────────────────────────────────────────────────────
 CATEGORY_MAP = [
@@ -107,18 +106,6 @@ def extract_section(text, section_name):
     return m.group(1).strip() if m else ''
 
 
-def extract_code_blocks(section_text, max_blocks=3):
-    """Return up to max_blocks fenced code block contents."""
-    blocks = re.findall(r'```(?:powershell|ps1|posh)?\s*\n(.*?)```', section_text, re.DOTALL | re.IGNORECASE)
-    cleaned = []
-    for b in blocks[:max_blocks]:
-        lines = [l for l in b.strip().splitlines() if not l.strip().startswith('#')]
-        code = '\n'.join(lines).strip()
-        if code:
-            cleaned.append(code)
-    return cleaned
-
-
 def parse_cmdlet_doc(filepath):
     """
     Parse a single cmdlet markdown file.
@@ -147,16 +134,13 @@ def parse_cmdlet_doc(filepath):
         return None
 
     synopsis_sec = extract_section(text, 'SYNOPSIS')
-    description = synopsis_sec.splitlines()[0].strip() if synopsis_sec else ''
-    # Clean up markdown
-    description = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', description)
-    description = re.sub(r'[*_`]', '', description).strip()
+    description = synopsis_from(synopsis_sec)
 
     syntax_sec = extract_section(text, 'SYNTAX')
     syntax = syntax_from(syntax_sec)
 
     examples_sec = extract_section(text, 'EXAMPLES')
-    examples = extract_code_blocks(examples_sec, 3)
+    examples = examples_from(examples_sec)
 
     return {
         'name': name,
@@ -208,16 +192,16 @@ def main():
     descriptions = {}
     modules_data = {}  # module_name -> {version, cmdlets: {}}
 
-    # Each Az.* module's version is the one the Az rollup release bundles (the docs' own
-    # "Module Version" front matter is a 0.0.0 placeholder).
-    module_version_map = gallery_dependencies('Az', version, 'az')
+    mod_dirs = sorted(d for d in azps_dir.iterdir() if d.is_dir() and d.name.startswith('Az.'))
 
-    # Scan Az.* module directories
-    for mod_dir in sorted(azps_dir.iterdir()):
-        if not mod_dir.is_dir():
-            continue
-        if not mod_dir.name.startswith('Az.'):
-            continue
+    # Each Az.* module's version is the one the Az rollup release bundles (the docs' own
+    # "Module Version" front matter is a 0.0.0 placeholder). Modules the rollup does not
+    # bundle (previews such as Az.Alb) take their own latest Gallery version.
+    module_version_map = gallery_dependencies('Az', version, 'az')
+    unbundled = {d.name: d.name for d in mod_dirs if not module_version_map.get(d.name)}
+    module_version_map |= gallery_module_versions(unbundled, 'az')
+
+    for mod_dir in mod_dirs:
         module_name = mod_dir.name
         mod_version = module_version_map.get(module_name)
         category = get_category(module_name)

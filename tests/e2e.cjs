@@ -1,5 +1,6 @@
 // End-to-end behaviour checks against a built site.
-//   npm run build && node tests/e2e.cjs
+//   npm run build && node tests/e2e.cjs            (every scenario)
+//   node tests/e2e.cjs "narrow dialog"              (scenarios whose name contains the text)
 // Serves dist/ itself on its own port (it never touches a running `astro preview`).
 // Needs Playwright with Chromium available (`npx playwright install chromium`).
 const http = require('node:http');
@@ -40,6 +41,125 @@ async function hold(ctx, pattern) {
  * reported against the scenario that raised them.
  */
 const scenarios = [
+  {
+    name: 'the first screen says what the site is for',
+    context: { viewport: { width: 390, height: 844 } },
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      const h = await p.textContent('.intro-compact h2');
+      check(/PowerShell cmdlet/.test(h), 'a phone shows what PSIndex is above the results', h);
+      await p.fill('input[type=search]', 'mailbox');
+      await p.waitForFunction(() => !document.querySelector('.intro-compact'));
+      await p.fill('input[type=search]', '');
+      await p.click('.intro-compact .intro-samples button >> nth=0');
+      await topIs(p, 'Get-MgUser');
+      check(!(await p.locator('.intro-compact').count()), 'a sample search replaces the intro with its results');
+      await p.setViewportSize({ width: 1440, height: 900 });
+      await p.fill('input[type=search]', '');
+      await p.waitForSelector('.pane-detail .intro h2');
+      check(!(await p.locator('.intro-compact').count()), 'a wide screen keeps the intro in the detail pane only');
+    },
+  },
+  {
+    name: 'no intro over a deep link still loading',
+    context: { viewport: { width: 390, height: 844 } },
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
+    async run(p) {
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+      check(!(await p.locator('.intro-compact').count()), 'a pending deep link shows no intro or sample searches');
+      this.release();
+      await titleIs(p, 'Get-MgUser');
+    },
+  },
+  {
+    name: 'a pasted command line searches its cmdlet',
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      await search(p, 'Get-MgUser -All', 'Get-MgUser');
+      const marks = await p.$$eval('.result mark', (m) => m.map((x) => x.textContent));
+      check(!marks.some((t) => /^all$/i.test(t)), 'a parameter is not matched inside names', marks.slice(0, 5).join(','));
+      // Parameters alone search nothing: the full list stays, with a note saying why.
+      await p.fill('input[type=search]', '-All');
+      await p.waitForSelector('.notice-link:has-text("aren’t searched")');
+      check(!param(p, 'q'), 'a parameter-only query is no query in the URL', p.url());
+      await p.fill('input[type=search]', 'Get-MgUser -All');
+      await p.waitForFunction(() => !document.querySelector('.notice-link'));
+    },
+  },
+  {
+    name: 'narrowing with an entry open moves focus into the dialog',
+    context: { viewport: { width: 1180, height: 820 } },
+    async run(p) {
+      await p.goto(`${BASE}/?q=user`);
+      await rowsReady(p);
+      await p.click('#result-0');
+      await p.waitForSelector('.detail-title');
+      await p.focus('input[type=search]');
+      await p.setViewportSize({ width: 820, height: 1180 });
+      await p.waitForFunction(() => document.querySelector('.pane-detail')?.getAttribute('role') === 'dialog');
+      await p.waitForFunction(() => document.activeElement?.id === 'detail-title');
+      check(true, 'the entry title has focus once the open entry becomes the dialog');
+    },
+  },
+  {
+    name: 'an entry with no syntax or example',
+    async run(p) {
+      await p.goto(`${BASE}/?c=exchange:Copy-CsVoicePolicy`);
+      await titleIs(p, 'Copy-CsVoicePolicy');
+      const note = await p.waitForSelector('.detail p.h-sub').then((e) => e.textContent());
+      check(!/above/.test(note), 'the no-example note points to no section the entry lacks', note);
+    },
+  },
+  {
+    name: 'filters that hide every match are named as the reason',
+    async run(p) {
+      await p.goto(`${BASE}/?s=graph&verb=Remove&q=get-mguser`);
+      const text = await p.waitForSelector('.empty:not([aria-busy]) .empty-title').then((e) => e.textContent());
+      check(/filters hide/.test(text) && !/No match/.test(text), 'the empty state says the filters hide the matches', text);
+      check(!(await p.$('.empty button:has-text("Search mguser")')), 'no noun hint when the query does match');
+      await p.click('.empty button:has-text("Clear filters")');
+      await topIs(p, 'Get-MgUser');
+      await p.goto(`${BASE}/?s=graph&verb=Remove&q=zzqqxx`);
+      const none = await p.waitForSelector('.empty:not([aria-busy]) .empty-title').then((e) => e.textContent());
+      check(/^No match/.test(none), 'a query with no match anywhere still says no match', none);
+      // A misspelling found only by typo matching is no claim that the filters hide real matches.
+      await p.goto(`${BASE}/?s=graph&verb=Remove&q=get-mgusrr`);
+      const typo = await p.waitForSelector('.empty:not([aria-busy]) .empty-title').then((e) => e.textContent());
+      check(/^No match/.test(typo), 'near misses are not counted as matches the filters hide', typo);
+    },
+  },
+  {
+    name: '404 page icon',
+    async run(p) {
+      await p.goto(`${BASE}/404.html`);
+      check(await p.locator('link[rel=icon][href="/favicon.svg"]').count() === 1, 'the 404 page has the site icon');
+    },
+  },
+  {
+    name: 'phone Back from a deep link',
+    context: { viewport: { width: 390, height: 844 } },
+    async run(p) {
+      await p.goto(`${BASE}/?q=get-mguser&c=graph:Get-MgUser`);
+      await titleIs(p, 'Get-MgUser');
+      await p.waitForFunction(() => document.querySelector('.pane-detail')?.getAttribute('role') === 'dialog');
+      await p.goBack();
+      await p.waitForFunction(() => !document.querySelector('.detail-title'));
+      check(p.url() === `${BASE}/?q=get-mguser`, 'Back from a deep-linked entry lands on its list', p.url());
+    },
+  },
+  {
+    name: 'a new search dismisses the broken-link notice',
+    async run(p) {
+      await p.goto(`${BASE}/?c=graph:No-SuchCmdlet`);
+      await p.waitForSelector('.notice-link');
+      await p.fill('input[type=search]', 'get-mguser');
+      await topIs(p, 'Get-MgUser');
+      await p.waitForFunction(() => !document.querySelector('.notice-link'));
+    },
+  },
   {
     name: 'search and open with the keyboard',
     async run(p) {
@@ -285,6 +405,8 @@ const scenarios = [
       await p.goto(`${BASE}/?s=entra&q=Connect-Entra&c=entra:Connect-Entra`);
       await p.waitForFunction(() => new URLSearchParams(location.search).get('c')?.includes('@'));
       const c = param(p, 'c');
+      // The key resolves before the list's rows arrive (separate worker replies): wait for the row.
+      await p.waitForSelector('.result.is-open');
       check(c.includes('@') && (await p.locator('.result.is-open').count()) === 1, 'legacy link is canonicalised', c);
     },
   },
@@ -340,8 +462,24 @@ const scenarios = [
     allowErrors: true,
     async setup(ctx) { await ctx.route(`**${BUILD_PATH}idx/az.json`, (r) => r.fulfill({ status: 500, body: 'boom' })); },
     async run(p) {
-      await p.goto(BASE);
+      await p.goto(`${BASE}/?q=user&c=graph:Get-MgUser`);
       await p.waitForSelector('[role=alert]');
+      const before = new URL(p.url()).search;
+      const band = await p.evaluate(() => ({
+        clear: !!document.querySelector('.searchbox-clear'),
+        kbd: !!document.querySelector('.searchbox-kbd'),
+        tabs: [...document.querySelectorAll('.source')].every((b) => b.disabled),
+        placeholder: document.querySelector('input[type=search]').placeholder,
+      }));
+      check(!band.clear && !band.kbd && band.tabs && band.placeholder === 'Index unavailable', 'a failed load offers no search actions in the band', JSON.stringify(band));
+      check(!(await p.$('.intro-keys')) && !(await p.$('.intro-samples')), 'a failed load shows no key legend or sample searches in the intro');
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press('/');
+      check(await p.evaluate(() => document.activeElement?.getAttribute('aria-label') !== 'Search cmdlets'), '"/" does not focus the read-only box after a failed load');
+      await p.keyboard.press('Escape');
+      await p.click('.wordmark');
+      await nextFrame(p);
+      check(new URL(p.url()).search === before, 'Escape and the wordmark keep the deep link for Reload', p.url());
     },
   },
   {
@@ -357,7 +495,7 @@ const scenarios = [
       // Names still search without descriptions, and the page says only names are searched.
       await p.fill('input[type=search]', 'device collection');
       await p.waitForFunction(() => /Collection/.test(document.querySelector('.result .result-name')?.textContent ?? ''));
-      check(/only cmdlet names/.test(await p.textContent('.pane-results')), 'a failed description file is announced');
+      check(/MECM descriptions didn’t load/.test(await p.textContent('.pane-results')), 'a failed description file is announced, naming its source', await p.textContent('.notice-link p').catch(() => ''));
       // A query only a description could match reaches the final empty state, not a busy one.
       await p.fill('input[type=search]', 'qqqzzzxx');
       await p.waitForSelector('.empty .chip');
@@ -551,7 +689,7 @@ const scenarios = [
 
       const text = await p.locator('#mcp-panel').innerText();
       check(/no authentication/i.test(text) && /read-only/i.test(text), 'says what the endpoint is', text.split('\n')[1]);
-      check(text.includes(URL) && text.includes('~/.cursor/mcp.json') && text.includes('.mcp.json') && text.includes('claude_desktop_config.json'), 'shows the endpoint and the three config files');
+      check(text.includes(URL) && text.includes('~/.cursor/mcp.json') && text.includes('.mcp.json at the workspace root') && text.includes('claude mcp add --transport http psindex') && text.includes('Add custom connector') && !text.includes('.vscode/mcp.json'), 'shows the endpoint and each client\'s setup');
       check(['search_cmdlets', 'get_cmdlet', 'list_modules'].every((name) => text.includes(name)), 'names the three tools');
 
       await p.click('#mcp-panel button[aria-label="Copy endpoint"]');
@@ -565,10 +703,11 @@ const scenarios = [
       };
       const cursor = JSON.parse(await readConfig('Copy Cursor config'));
       const vscode = JSON.parse(await readConfig('Copy VS Code config'));
-      const claude = JSON.parse(await readConfig('Copy Claude Desktop config'));
+      const claude = JSON.parse(await readConfig('Copy Claude Code config'));
       check(cursor.mcpServers?.psindex?.url === URL && !cursor.mcpServers.psindex.type, 'Cursor config is a remote mcpServers url', JSON.stringify(cursor));
       check(vscode.mcpServers?.psindex?.type === 'http' && vscode.mcpServers.psindex.url === URL && !vscode.servers, 'VS Code config is mcpServers with type http', JSON.stringify(vscode));
-      check(claude.mcpServers?.psindex?.command === 'npx' && claude.mcpServers.psindex.args?.includes('mcp-remote') && claude.mcpServers.psindex.args?.includes(URL), 'Claude Desktop config runs mcp-remote', JSON.stringify(claude));
+      check(claude.mcpServers?.psindex?.type === 'http' && claude.mcpServers.psindex.url === URL, 'Claude Code config is mcpServers with type http', JSON.stringify(claude));
+      check(!(await p.locator('#mcp-panel section[aria-label="Claude Desktop and claude.ai"] pre').count()), 'Claude Desktop gets connector steps, not a config file');
 
       await p.keyboard.press('/');
       const slashStays = await p.evaluate(() => {
@@ -636,6 +775,21 @@ const scenarios = [
       await p.setViewportSize({ width: 390, height: 844 });
       const phoneBtn = await p.locator(openBtn).boundingBox();
       check(phoneBtn && phoneBtn.x >= 0 && phoneBtn.x + phoneBtn.width <= 390 && phoneBtn.width >= 24, 'the info button fits and stays tappable at 390px', JSON.stringify(phoneBtn));
+      await p.click(openBtn);
+      await p.waitForSelector('#mcp-panel[open]');
+      // Each source line of a config is one rendered line: a long one scrolls sideways instead of wrapping.
+      const wraps = await p.evaluate(() => [...document.querySelectorAll('#mcp-panel .code pre')].map((pre) => {
+        const lines = pre.textContent.split('\n').length;
+        const lh = parseFloat(getComputedStyle(pre).lineHeight);
+        const cs = getComputedStyle(pre);
+        const inner = pre.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+        const panel = document.getElementById('mcp-panel').getBoundingClientRect();
+        const r = pre.getBoundingClientRect();
+        return { lines, rendered: Math.round(inner / lh), scrolls: pre.scrollWidth > pre.clientWidth, inside: r.right <= panel.right + 1 };
+      }));
+      check(wraps.length === 3 && wraps.every((w) => w.lines === w.rendered && w.inside) && wraps.some((w) => w.scrolls), 'config lines do not wrap at 390px', JSON.stringify(wraps));
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => !document.querySelector('#mcp-panel')?.open);
       const darkBg = await fits('dark');
       const lightBg = await fits('light');
       check(darkBg !== lightBg, 'the panel follows the light and dark themes', `${darkBg} / ${lightBg}`);
@@ -659,6 +813,387 @@ const scenarios = [
       check(sameDocument && !param(p, 'c') && !(await p.locator('.detail-title').count()), 'dismissed deep link stays closed', sameDocument ? '' : 'page navigated');
     },
   },
+  {
+    name: 'query tokens and highlights',
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      await p.fill('input[type=search]', 'get-mguser');
+      await p.waitForFunction(() => new URLSearchParams(location.search).get('q') === 'get-mguser');
+      await p.fill('input[type=search]', '--');
+      await p.waitForFunction((t) => document.querySelector('.count')?.textContent === t, TOTAL_LABEL);
+      // The URL is written after the render that shows the count.
+      await p.waitForFunction(() => !new URLSearchParams(location.search).has('q')).catch(() => {});
+      check(!param(p, 'q'), 'a query without a token is no query in the URL', p.url());
+      await p.goto(`${BASE}/?s=mecm&verb=Zzz&q=--`);
+      await p.waitForSelector('.empty .chip');
+      check((await p.textContent('.empty-title')) === 'Nothing matches these filters.', 'a query without a token is no query in the empty state', await p.textContent('.empty-title'));
+      await p.goto(BASE);
+      await rowsReady(p);
+      const marks = () => p.evaluate(() => {
+        const row = [...document.querySelectorAll('.result')].find((r) => r.querySelector('.result-name')?.textContent === 'Get-MgUser');
+        return [...(row?.querySelectorAll('mark') ?? [])].map((m) => m.textContent);
+      });
+      await search(p, 'get-mg mguser', 'Get-MgUser');
+      check((await marks()).join('|') === 'Get-MgUser', 'overlapping marks merge into their union', (await marks()).join('|'));
+      await search(p, '"Get-MgUser",', 'Get-MgUser');
+      check((await marks()).join('|') === 'Get-MgUser', 'surrounding punctuation is trimmed from a token', (await marks()).join('|'));
+      await search(p, 'get-mg-usr', 'Get-MgUser');
+      check(true, 'a misplaced hyphen plus a typo still finds the cmdlet');
+    },
+  },
+  {
+    name: 'short tokens never mark across the verb',
+    async run(p) {
+      await p.goto(`${BASE}/?s=exchange&q=${encodeURIComponent('historicalsearch thi')}`);
+      await p.waitForFunction(() => [...document.querySelectorAll('.result .result-name')].some((n) => n.textContent === 'Get-HistoricalSearch'));
+      const text = await p.evaluate(() => [...[...document.querySelectorAll('.result .result-name')].find((n) => n.textContent === 'Get-HistoricalSearch').querySelectorAll('mark')].map((m) => m.textContent).join('|'));
+      check(text === 'HistoricalSearch', 'a description-only short token is not marked in the name', text);
+    },
+  },
+  {
+    name: 'empty-state hints from the query',
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      // Parameters are not searched; a value that matches nothing still empties the list.
+      await p.fill('input[type=search]', 'Get-MgUser -UserId qqzzqq');
+      await p.waitForSelector('.empty .chip');
+      check((await p.textContent('.empty .chip')) === 'Search Get-MgUser', 'a pasted command line offers its cmdlet name', await p.textContent('.empty .chip'));
+      await p.click('.empty .chip');
+      await topIs(p, 'Get-MgUser');
+      check((await p.inputValue('input[type=search]')) === 'Get-MgUser', 'the suggestion searches the name alone');
+      // A pipeline pasted without spaces offers its first cmdlet, not the whole run.
+      await p.goto(`${BASE}/?q=${encodeURIComponent('Get-MgUser|Select-Object Id')}`);
+      await p.waitForSelector('.empty .chip');
+      check((await p.textContent('.empty .chip')) === 'Search Get-MgUser', 'a pipeline without spaces offers its first cmdlet name', await p.textContent('.empty .chip'));
+      await p.goto(`${BASE}/?q=${encodeURIComponent('Get-MgUser|Select-Object')}`);
+      await p.waitForSelector('.empty .chip');
+      check((await p.textContent('.empty .chip')) === 'Search Get-MgUser', 'a bare pipeline offers its first cmdlet name', await p.textContent('.empty .chip'));
+      await p.goto(`${BASE}/?s=mecm&q=Get-MgUser`);
+      await p.waitForSelector('.empty .chip');
+      const chips = await p.locator('.empty .chip').allTextContents();
+      check(chips.join('|') === 'Search MgUser|Search all cmdlets', 'a lone cmdlet name offers its noun', chips.join('|'));
+      await p.goto(`${BASE}/?s=mecm&q=xyzq`);
+      await p.waitForSelector('.empty .chip');
+      check(!(await p.locator('.empty p:not(.empty-title)').count()), 'a single plain word gets no hint');
+      // A long pasted name wraps inside the pane: neither the title nor its suggestion runs past it.
+      for (const [w, h, name] of [[390, 844, 'Get-MgBetaDeviceManagementWindowsAutopilotDeploymentProfileAssignedDevice'], [1440, 900, 'Get-MgBetaIdentityGovernanceLifecycleWorkflowRunSubjectProcessingResultTaskProcessingResultSubjectServiceProvisioningError -Foo x']]) {
+        await p.setViewportSize({ width: w, height: h });
+        await p.goto(`${BASE}/?s=mecm&q=${encodeURIComponent(name)}`);
+        await p.waitForSelector('.empty .chip');
+        const laid = await p.evaluate(() => {
+          const pane = document.getElementById('results');
+          const right = pane.getBoundingClientRect().right;
+          return {
+            pane: right,
+            overflow: pane.scrollWidth - pane.clientWidth,
+            out: [...document.querySelectorAll('.empty, .empty-title, .empty .chip')].map((el) => Math.round(el.getBoundingClientRect().right - right)).filter((d) => d > 0),
+          };
+        });
+        check(laid.overflow <= 0 && !laid.out.length, `a long query's empty state fits its pane at ${w}px`, JSON.stringify(laid));
+      }
+      // With zero results the combobox has no popup.
+      const aria = await p.evaluate(() => { const i = document.querySelector('input[type=search]'); return [i.getAttribute('aria-expanded'), i.getAttribute('aria-controls')]; });
+      check(aria[0] === 'false' && aria[1] === null, 'no results: the combobox is collapsed', aria.join());
+    },
+  },
+  {
+    name: 'filter links and recovery',
+    async run(p) {
+      await p.goto(`${BASE}/?verb=get`);
+      await rowsReady(p);
+      check((await p.locator('.result:not(.result-skel)').count()) > 0, 'a facet value in another case matches');
+      await p.click('.chip[aria-controls=filters]');
+      const shown = await p.$eval('.filters select', (s) => s.selectedOptions[0]?.textContent);
+      check(shown === 'Get', 'the filter bar shows the facet in its own spelling', shown);
+      // Matching in any case is no new search: an Enter pressed before the results still opens.
+      await p.goto(`${BASE}/?q=get-mguser&verb=get`);
+      await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+      await p.keyboard.press('Enter');
+      await titleIs(p, 'Get-MgUser');
+      await p.goto(`${BASE}/?s=az&ver=beta`);
+      await rowsReady(p);
+      check(!param(p, 'ver') && (await p.locator('.result:not(.result-skel)').count()) > 0, 'a ver filter on a source without one is dropped', p.url());
+      await p.goto(`${BASE}/?s=az&verb=Approve`);
+      await rowsReady(p);
+      await p.click('.source:has-text("Entra")');
+      await p.waitForSelector('.empty .chip');
+      const chips = await p.locator('.empty .chip').allTextContents();
+      check(chips.join('|') === 'Clear filters|Search all cmdlets', 'an empty filtered source offers Clear filters and Search all', chips.join('|'));
+      await p.click('.empty .chip:text("Clear filters")');
+      await p.waitForFunction(() => location.search === '?s=entra');
+      await rowsReady(p);
+      await p.goto(`${BASE}/?verb=Zzz`);
+      await p.waitForSelector('.empty .chip');
+      const all = await p.locator('.empty .chip').allTextContents();
+      check(all.join('|') === 'Clear filters', 'across every source there is no Search all', all.join('|'));
+    },
+  },
+  {
+    name: 'paging the result list',
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      const active = () => p.getAttribute('input[type=search]', 'aria-activedescendant');
+      const waitActive = (id) => p.waitForFunction((x) => document.querySelector('input[type=search]').getAttribute('aria-activedescendant') === x, id);
+      await waitActive('result-0');
+      await p.keyboard.press('PageDown');
+      await p.waitForFunction(() => Number(document.querySelector('input[type=search]').getAttribute('aria-activedescendant')?.split('-')[1]) > 3);
+      const paged = await active();
+      await p.keyboard.press('PageUp');
+      await waitActive('result-0');
+      await p.keyboard.press('Control+End');
+      await waitActive(`result-${total - 1}`);
+      await p.keyboard.press('Home');
+      await nextFrame(p);
+      check((await active()) === `result-${total - 1}`, 'plain Home stays with the text box', await active());
+      await p.keyboard.press('Control+Home');
+      await waitActive('result-0');
+      check(true, 'PageDown/PageUp and Ctrl+End/Ctrl+Home move the cursor', paged);
+    },
+  },
+  {
+    name: 'unprefixed links and the broken-link notice',
+    async run(p) {
+      await p.goto(`${BASE}/?c=Get-Mailbox`);
+      await titleIs(p, 'Get-Mailbox');
+      await p.waitForFunction(() => new URLSearchParams(location.search).get('c') === 'exchange:Get-Mailbox');
+      await p.goto(`${BASE}/?c=graph:Get-MgNope&q=user`);
+      await p.waitForSelector('.notice-link');
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => !document.querySelector('.notice-link'));
+      check((await p.inputValue('input[type=search]')) === 'user', 'Escape dismisses the notice before clearing the query');
+    },
+  },
+  {
+    name: 'long names show their match',
+    async run(p) {
+      const visible = () => p.evaluate(() => [...document.querySelectorAll('.result:not(.result-skel) .result-name')].map((n) => {
+        const m = n.querySelector('mark');
+        if (!m) return 'no mark';
+        const nr = n.getBoundingClientRect(), mr = m.getBoundingClientRect();
+        return mr.right <= nr.right + 1 && mr.right > nr.left ? 'ok' : `${n.textContent} mark ${mr.left}-${mr.right} in ${nr.left}-${nr.right}`;
+      }));
+      await p.goto(`${BASE}/?q=approvedclientappcount`);
+      await p.waitForSelector('.result mark');
+      const wide = await visible();
+      check(wide.length && wide.every((v) => v === 'ok'), 'a match past the cut is scrolled into view', wide.join('; '));
+      await p.setViewportSize({ width: 390, height: 844 });
+      await p.goto(`${BASE}/?s=graph&q=Get-MgBetaDeviceManagementWindowsAutopilotDeploymentProfileAssignedDevice`);
+      await p.waitForSelector('.result mark');
+      await nextFrame(p);
+      const narrow = await visible();
+      check(narrow.length > 1 && narrow.every((v) => v === 'ok'), 'at phone width the end of a long match shows', narrow.join('; '));
+    },
+  },
+  {
+    name: 'narrow dialog and history',
+    context: { viewport: { width: 390, height: 844 }, hasTouch: true },
+    async run(p) {
+      await p.goto(`${BASE}/?q=user`);
+      await rowsReady(p);
+      await p.click('.result');
+      // Read in the same task that sees the dialog: its history entry must name it already.
+      const c = await p.evaluate(() => new Promise((done) => {
+        const look = () => (document.querySelector('.app[data-open]') ? done(new URLSearchParams(location.search).get('c')) : requestAnimationFrame(look));
+        look();
+      }));
+      check(!!c, 'the dialog history entry names the entry as soon as it shows', String(c));
+      await p.goBack();
+      await p.waitForFunction(() => !document.querySelector('.app[data-open]'));
+      await p.goForward();
+      await p.waitForSelector('.app[data-open] .detail-title');
+      check(param(p, 'c') === c, 'Forward after closing reopens the entry the URL names', p.url());
+      await p.goBack();
+      // On a timeout, say which history state the app was left in (seen once in CI, not locally).
+      await p.waitForFunction(() => !document.querySelector('.app[data-open]') && !new URLSearchParams(location.search).get('c')).catch(async (e) => {
+        const at = await p.evaluate(() => ({ search: location.search, open: !!document.querySelector('.app[data-open]'), state: history.state, length: history.length }));
+        throw new Error(`${e.message.split('\n')[0]} after Back from a reopened entry: ${JSON.stringify(at)}`);
+      });
+      // "/" over the dialog closes it and puts the cursor in the search box.
+      await p.click('.result');
+      await p.waitForFunction(() => document.activeElement?.id === 'detail-title');
+      await p.keyboard.press('/');
+      await p.waitForFunction(() => !document.querySelector('.app[data-open]') && document.activeElement?.getAttribute('aria-label') === 'Search cmdlets');
+      const sel = await p.evaluate(() => { const i = document.activeElement; return i.selectionEnd - i.selectionStart; });
+      check(sel === 4 && !param(p, 'c'), '"/" closes the dialog and selects the query', String(sel));
+      // A tap on a tab off-centre selects it (no scroll between press and release).
+      for (const name of ['Az', 'Entra', 'Exchange']) {
+        await p.tap(`.source:has-text("${name}")`);
+        await p.waitForFunction((n) => document.querySelector('.source.is-on')?.textContent?.startsWith(n), name);
+      }
+      check(true, 'tapping a source tab selects it');
+      await p.click('.source:has-text("Graph")');
+      await p.waitForFunction(() => document.querySelector('.source.is-on')?.textContent?.startsWith('Graph'));
+    },
+  },
+  {
+    name: 'catch-all categories and named common parameters',
+    async run(p) {
+      await p.goto(`${BASE}/?c=az:Get-AzADDomainService`);
+      await p.waitForSelector('.detail .params');
+      const tags = await p.locator('.detail .tags .tag').allTextContents();
+      check(!tags.includes('Other'), 'a catch-all category gets no tag', tags.join(', '));
+      const one = await p.textContent('.detail .params ~ .link-btn');
+      check(/^Show 1 common parameter \(-\w+\)$/.test(one), 'one hidden parameter is named, in the singular', one);
+      await p.goto(`${BASE}/?c=az:New-AzNatGateway`);
+      await p.waitForSelector('.detail .params');
+      const btn = p.locator('.detail .params ~ .link-btn');
+      const three = await btn.textContent();
+      check(/^Show 3 common parameters \(/.test(three) && /-WhatIf/.test(three) && /-Confirm/.test(three) && /-DefaultProfile/.test(three), 'the toggle names what it hides', three);
+      await btn.click();
+      check(/^Hide 3 common parameters/.test(await btn.textContent()), 'the open toggle says it hides them', await btn.textContent());
+      await p.goto(`${BASE}/?c=exchange:Add-ADPermission`);
+      await p.waitForSelector('.detail .tags');
+      const exo = await p.locator('.detail .tags .tag').allTextContents();
+      check(!exo.some((t) => /General$/.test(t)), 'a "<source> General" category gets no tag', exo.join(', '));
+    },
+  },
+  {
+    name: 'loading details is announced',
+    async setup(ctx) { ctx.release = await hold(ctx, `**${BUILD_PATH}data/**`); },
+    async run(p, ctx) {
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      const status = await p.waitForSelector('.detail-skel[role=status]');
+      check((await status.textContent()).trim() === 'Loading details', 'the skeleton is a status region with readable text', await status.textContent());
+      ctx.release();
+      await p.waitForSelector('.detail .code-syntax');
+    },
+  },
+  {
+    name: 'reopening after a failed load retries',
+    allowErrors: true,
+    context: { viewport: { width: 1440, height: 900 } },
+    async setup(ctx) {
+      ctx.requests = 0;
+      await ctx.route(`**${BUILD_PATH}data/graph/Microsoft.Graph.Groups.json`, (r) => (ctx.requests++ ? r.continue() : r.abort()));
+    },
+    async run(p, ctx) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      await search(p, 'Get-MgGroup', 'Get-MgGroup');
+      await p.click('.result');
+      await p.waitForSelector('.detail .notice-error');
+      await p.click('.result');
+      await p.waitForSelector('.detail .code-syntax');
+      check(ctx.requests === 2, 'opening the same cmdlet again fetches its file afresh', String(ctx.requests));
+    },
+  },
+  {
+    name: 'a rejected copy says so',
+    async setup(ctx) {
+      await ctx.addInitScript(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); });
+    },
+    async run(p) {
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      await p.waitForSelector('.detail .perms');
+      const btn = p.locator('button[aria-label="Copy all permissions"]');
+      await btn.click();
+      await p.waitForFunction(() => document.querySelector('button[aria-label="Copy all permissions"]')?.classList.contains('is-failed'));
+      const said = await p.evaluate(() => [...document.querySelectorAll('[role=status]')].map((e) => e.textContent).filter(Boolean));
+      check(said.includes('Copy failed'), 'a failed copy is announced', said.join(' / '));
+      await p.click('.detail-links button:has-text("Copy link")');
+      check(/Copy failed/.test(await p.textContent('.detail-links .btn-quiet')), 'the text button reads "Copy failed"', await p.textContent('.detail-links .btn-quiet'));
+    },
+  },
+  {
+    name: 'detail pane fits its width',
+    async run(p) {
+      for (const width of [390, 901, 1000, 1100]) {
+        // Leave the app before resizing: widening an open phone dialog steps back over its history
+        // entry, and that asynchronous step would undo the next goto.
+        await p.goto('about:blank');
+        await p.setViewportSize({ width, height: 900 });
+        for (const c of ['exchange:New-CsTeamsVoiceApplicationsPolicy', 'exchange:Set-Mailbox', 'graph:Add-MgBetaBulkDirectoryRecommendationImpactedResourceTag']) {
+          await p.goto(`${BASE}/?c=${c}`);
+          await p.waitForSelector('.detail .code-syntax');
+          await p.waitForSelector('.detail .related');
+          const m = await p.evaluate(() => {
+            const pane = document.querySelector('.pane-detail');
+            const pre = Math.max(...[...document.querySelectorAll('.code-syntax pre')].map((e) => e.scrollWidth - e.clientWidth));
+            // Each syntax line's text, to find a "-" or "[" parted from its parameter's name.
+            const lines = new Map();
+            for (const pre of document.querySelectorAll('.code-syntax pre')) {
+              const walk = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+              for (let n; (n = walk.nextNode());) {
+                for (let i = 0; i < n.length; i++) {
+                  const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1);
+                  const box = r.getClientRects()[0];
+                  if (box) lines.set(Math.round(box.top), (lines.get(Math.round(box.top)) ?? '') + n.data[i]);
+                }
+              }
+            }
+            const parted = [...lines.values()].filter((l) => /(^|[\s[])-$|\[$/.test(l.trimEnd()));
+            return { over: pane.scrollWidth - pane.clientWidth, pre, parted };
+          });
+          check(m.over <= 0, `${c} at ${width}px: the pane never scrolls sideways`, String(m.over));
+          check(m.pre <= 0, `${c} at ${width}px: no syntax runs past the box`, String(m.pre));
+          check(!m.parted.length, `${c} at ${width}px: no "-" or "[" parted from its name`, m.parted.join(' | '));
+        }
+      }
+    },
+  },
+  {
+    name: 'comment contrast in the light theme',
+    context: { colorScheme: 'light' },
+    async run(p) {
+      await p.goto(`${BASE}/?c=entra:Get-EntraUser`);
+      await p.waitForSelector('.detail .t-com');
+      const ratio = await p.evaluate(() => {
+        const lum = (s) => { const c = s.match(/\d+/g).slice(0, 3).map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+        const com = document.querySelector('.t-com');
+        const a = lum(getComputedStyle(com).color), b = lum(getComputedStyle(com.closest('pre')).backgroundColor);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+      check(ratio >= 4.5, 'comments meet 4.5:1 on the code frame', ratio.toFixed(2));
+    },
+  },
+  {
+    name: 'tab strip fade only while tabs are hidden',
+    context: { viewport: { width: 390, height: 844 } },
+    async run(p) {
+      const faded = () => p.evaluate(() => getComputedStyle(document.querySelector('.sources')).maskImage !== 'none');
+      await p.goto(BASE);
+      await rowsReady(p);
+      await p.waitForFunction(() => document.querySelector('.sources').hasAttribute('data-more'));
+      check(await faded(), 'the right edge fades while more tabs lie past it');
+      await p.goto(`${BASE}/?s=mecm`);
+      await rowsReady(p);
+      await p.waitForFunction(() => { const s = document.querySelector('.sources'); return Math.ceil(s.scrollLeft + s.clientWidth) >= s.scrollWidth; });
+      await nextFrame(p);
+      check(!(await faded()), 'no fade once the strip is scrolled to its end');
+    },
+  },
+  {
+    name: 'short viewports scroll the page',
+    async run(p) {
+      for (const [width, height] of [[844, 390], [1400, 320]]) {
+        await p.setViewportSize({ width, height });
+        await p.goto(`${BASE}/?q=get-mguser`);
+        await rowsReady(p);
+        await p.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+        const m = await p.evaluate(() => ({ page: document.documentElement.scrollHeight, y: scrollY, results: document.querySelector('.results').getBoundingClientRect().height }));
+        check(m.page > height && m.y > 0, `${width}x${height}: the band scrolls away`, JSON.stringify(m));
+        check(m.results >= height * 0.6, `${width}x${height}: the results get most of the viewport`, String(m.results));
+      }
+      await p.setViewportSize({ width: 1440, height: 900 });
+      await p.goto(`${BASE}/?q=get-mguser`);
+      await rowsReady(p);
+      const tall = await p.evaluate(() => document.documentElement.scrollHeight === innerHeight);
+      check(tall, 'a full-height viewport keeps the page fixed');
+    },
+  },
+  {
+    name: '404 keeps the stored theme',
+    context: { colorScheme: 'dark' },
+    async setup(ctx) { await ctx.addInitScript(() => { try { localStorage.setItem('psindex-theme', 'light'); } catch {} }); },
+    async run(p) {
+      await p.goto(`${BASE}/404.html`);
+      const m = await p.evaluate(() => [document.documentElement.dataset.theme, getComputedStyle(document.body).backgroundColor]);
+      check(m[0] === 'light' && m[1] === 'rgb(238, 240, 245)', 'the 404 page applies the stored theme', m.join(' / '));
+    },
+  },
 ];
 
 async function runScenario(browser, sc) {
@@ -674,7 +1209,9 @@ async function runScenario(browser, sc) {
     // The scenario itself passes when every wait in it was met and the page raised no errors.
     check(!errors.length, sc.name, errors.length ? `page errors: ${errors.join('; ')}` : '');
   } catch (e) {
-    check(false, sc.name, e.message.split('\n')[0]);
+    // Name every line of this file on the stack: the failing wait and the scenario step that ran it.
+    const at = [...(e.stack ?? '').matchAll(/e2e\.cjs:(\d+)/g)].map((m) => m[1]);
+    check(false, sc.name, e.message.split('\n')[0] + (at.length ? ` (at line ${[...new Set(at)].join(' < ')})` : ''));
   } finally {
     await ctx.close();
   }
@@ -689,7 +1226,11 @@ async function runScenario(browser, sc) {
   let browser;
   try {
     browser = await chromium.launch();
-    for (const sc of scenarios) await runScenario(browser, sc);
+    const only = process.argv[2];
+    const chosen = scenarios.filter((s) => !only || s.name.includes(only));
+    // A misspelled filter must not pass green with nothing run.
+    if (!chosen.length) check(false, 'harness', `no scenario name contains "${only}"`);
+    for (const sc of chosen) await runScenario(browser, sc);
   } catch (e) {
     check(false, 'harness', e.message);
   } finally {

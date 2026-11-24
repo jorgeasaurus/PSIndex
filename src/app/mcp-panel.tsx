@@ -1,13 +1,14 @@
-// "Use with AI agents": how to point a client at the public /mcp endpoint.
-// Shapes checked against the vendors' docs in November 2026:
-//   Cursor remote servers are ~/.cursor/mcp.json, top-level mcpServers, a url and no type.
+// "Use with AI agents": how to point a client at the public /mcp endpoint. README ## MCP gives
+// the same setups. Shapes checked against the vendors' docs in November 2026, except Cursor's,
+// which is carried over from the earlier check (cursor.com could not be reached this time):
+//   Cursor: ~/.cursor/mcp.json or .cursor/mcp.json, top-level mcpServers, a url and no type.
 //     https://cursor.com/docs/mcp
-//   VS Code's Copilot harness reads workspace .mcp.json (or ~/.copilot/mcp-config.json),
-//     top-level mcpServers, with type "http". .vscode/mcp.json and a top-level "servers"
-//     object are the deprecated Local harness, which that harness does not read.
+//   VS Code (Copilot harness): workspace-root .mcp.json or ~/.copilot/mcp-config.json, top-level
+//     mcpServers, type "http". .vscode/mcp.json with "servers" belongs to the deprecated Local harness.
 //     https://code.visualstudio.com/docs/agents/reference/mcp-configuration
-//   Claude Desktop's claude_desktop_config.json is stdio only, so a remote URL goes through
-//     npx mcp-remote. The official remote path is a custom connector with this URL and no sign-in.
+//   Claude Code: project .mcp.json, mcpServers with type "http" (an entry without type is stdio).
+//     https://code.claude.com/docs/en/mcp
+//   Claude Desktop and claude.ai: a custom connector. claude_desktop_config.json holds local servers only.
 //     https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Copy, Info, X } from 'lucide-preact';
@@ -15,30 +16,24 @@ import { CopyIconButton, CopyTextButton } from './copy';
 
 const MCP_URL = 'https://psindex.vercel.app/mcp';
 
-const SETUPS: { client: string; file: string; note?: string; label: string; config: unknown }[] = [
-  {
-    client: 'Cursor',
-    file: '~/.cursor/mcp.json',
-    label: 'Copy Cursor config',
-    config: { mcpServers: { psindex: { url: MCP_URL } } },
-  },
+const SETUPS: { client: string; where: string; note?: string; config?: object }[] = [
+  { client: 'Cursor', where: '~/.cursor/mcp.json or .cursor/mcp.json', config: { mcpServers: { psindex: { url: MCP_URL } } } },
   {
     client: 'VS Code',
-    file: '.mcp.json',
-    note: 'Workspace file. The same JSON works in ~/.copilot/mcp-config.json.',
-    label: 'Copy VS Code config',
+    where: '.mcp.json at the workspace root',
+    note: 'The same JSON works in ~/.copilot/mcp-config.json for every workspace.',
     config: { mcpServers: { psindex: { type: 'http', url: MCP_URL } } },
   },
   {
-    client: 'Claude Desktop',
-    file: 'claude_desktop_config.json',
-    note: 'Local config, via npx mcp-remote. A custom connector can use the endpoint with no sign-in.',
-    label: 'Copy Claude Desktop config',
-    config: {
-      mcpServers: {
-        psindex: { command: 'npx', args: ['-y', 'mcp-remote', MCP_URL] },
-      },
-    },
+    client: 'Claude Code',
+    where: '.mcp.json in the project',
+    note: `Or run: claude mcp add --transport http psindex ${MCP_URL}`,
+    config: { mcpServers: { psindex: { type: 'http', url: MCP_URL } } },
+  },
+  {
+    client: 'Claude Desktop and claude.ai',
+    where: 'Customize → Connectors → Add custom connector',
+    note: 'Enter the endpoint above. It needs no sign-in. claude_desktop_config.json holds local servers only.',
   },
 ];
 
@@ -122,16 +117,16 @@ export function McpPanel() {
 
           <div class="mcp-setups">
             {SETUPS.map((setup) => {
-              const text = JSON.stringify(setup.config, null, 2);
+              const text = setup.config && JSON.stringify(setup.config, null, 2);
               return (
                 <section class="mcp-block" key={setup.client} aria-label={setup.client}>
                   <h3>{setup.client}</h3>
-                  <p class="mcp-file">{setup.file}</p>
+                  <p class="mcp-file">{setup.where}</p>
                   {setup.note && <p class="mcp-note">{setup.note}</p>}
-                  <div class="code">
+                  {text && <div class="code">
                     <pre><code>{text}</code></pre>
-                    <CopyIconButton text={text} label={setup.label} small />
-                  </div>
+                    <CopyIconButton text={text} label={`Copy ${setup.client} config`} small />
+                  </div>}
                 </section>
               );
             })}

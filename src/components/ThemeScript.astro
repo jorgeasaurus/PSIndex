@@ -1,0 +1,8 @@
+---
+// Applies the stored theme override before first paint, so a page never flashes the OS theme
+// first. Every page includes it; the toggle itself lives in src/app/theme.ts.
+import { THEME_KEY } from '../app/theme';
+---
+<script is:inline define:vars={{ THEME_KEY }}>
+  try { const t = localStorage.getItem(THEME_KEY); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+</script>

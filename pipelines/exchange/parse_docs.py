@@ -11,13 +11,12 @@ Output:
     $PSINDEX_OUT/modules/{Module}.json
 """
 
-import os
 import re
 import json
 import sys
 from pathlib import Path
 
-from common import gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
+from common import examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, synopsis_from, syntax_from
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -30,13 +29,15 @@ WORKLOAD_DIRS = [
 ]
 
 # -- Exchange noun-based sub-category mapping --------------------------------
+# The first pattern that matches the noun wins, so Client Access precedes the generic Mailbox
+# pattern its CASMailbox, OwaMailboxPolicy and ActiveSyncMailboxPolicy nouns also match.
 EXCHANGE_CATEGORY_MAP = [
+    (r'CASMailbox|OwaMailboxPolicy|ActiveSync', 'Client Access'),
     (r'Mailbox', 'Mailbox Management'),
     (r'TransportRule|TransportConfig', 'Transport Rules'),
     (r'DlpCompliance', 'Data Loss Prevention'),
     (r'RetentionPolicy|RetentionCompliance', 'Retention & Compliance'),
     (r'AntiPhish|AntiSpam|MalwareFilter|SafeAttachment|SafeLinks', 'Threat Protection'),
-    (r'CASMailbox|OwaMailboxPolicy|ActiveSync', 'Client Access'),
     (r'DistributionGroup|UnifiedGroup|DynamicDistributionGroup', 'Groups & Distribution'),
     (r'OrganizationConfig|AcceptedDomain|RemoteDomain|FederatedOrganization', 'Organization'),
     (r'MoveRequest|MigrationBatch|MigrationEndpoint|MigrationUser', 'Migration'),
@@ -50,12 +51,13 @@ VERB_RE = re.compile(r'^([A-Z][a-z]+)-')
 CMDLET_RE = re.compile(r'^[A-Z][a-z]+-[A-Z]\w+')
 
 # -- PowerShell Gallery package names per module -----------------------------
+# Only modules published on the Gallery. SkypeForBusiness (the retired SkypeOnlineConnector
+# download), officewebapps and the SharePoint Migration Tool module (installed with SPMT)
+# are not, so their module files record no version.
 MODULE_PACKAGE_MAP = {
     'ExchangePowerShell': 'ExchangeOnlineManagement',
     'MicrosoftTeams': 'MicrosoftTeams',
-    'SkypeForBusiness': 'SkypeOnlineConnector',
     'WhiteboardAdmin': 'WhiteboardAdmin',
-    'Microsoft.SharePoint.MigrationTool.PowerShell': 'Microsoft.SharePoint.MigrationTool',
 }
 
 def get_exchange_category(cmdlet_name):
@@ -88,22 +90,7 @@ def extract_section(text, section_name):
     return m.group(1).strip() if m else ''
 
 
-def extract_code_blocks(section_text, max_blocks=3):
-    """Return up to max_blocks fenced code block contents."""
-    blocks = re.findall(
-        r'```(?:powershell|ps1|posh)?\s*\n(.*?)```',
-        section_text, re.DOTALL | re.IGNORECASE,
-    )
-    cleaned = []
-    for b in blocks[:max_blocks]:
-        lines = [l for l in b.strip().splitlines() if not l.strip().startswith('#')]
-        code = '\n'.join(lines).strip()
-        if code:
-            cleaned.append(code)
-    return cleaned
-
-
-def parse_cmdlet_doc(filepath, workload_name):
+def parse_cmdlet_doc(filepath, workload_name, default_module):
     """
     Parse a single cmdlet markdown file.
     Returns dict with: name, module, category, description, syntax, examples
@@ -117,8 +104,9 @@ def parse_cmdlet_doc(filepath, workload_name):
     if not CMDLET_RE.match(name):
         return None
 
-    # Module name from front matter
-    module = front.get('Module Name', '') or workload_name
+    # Module name from front matter, else the workload's module directory. It also names the
+    # module file, so it stays a file-safe module name, never the workload's display name.
+    module = front.get('Module Name', '') or default_module
 
     # Category: Exchange cmdlets get sub-categorized, others use workload name
     if workload_name == 'Exchange':
@@ -127,16 +115,13 @@ def parse_cmdlet_doc(filepath, workload_name):
         category = workload_name
 
     synopsis_sec = extract_section(text, 'SYNOPSIS')
-    description = synopsis_sec.splitlines()[0].strip() if synopsis_sec else ''
-    # Clean up markdown
-    description = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', description)
-    description = re.sub(r'[*_`]', '', description).strip()
+    description = synopsis_from(synopsis_sec)
 
     syntax_sec = extract_section(text, 'SYNTAX')
     syntax = syntax_from(syntax_sec)
 
     examples_sec = extract_section(text, 'EXAMPLES')
-    examples = extract_code_blocks(examples_sec, 3)
+    examples = examples_from(examples_sec)
 
     return {
         'name': name,
@@ -168,12 +153,12 @@ def main():
     for rel_path, workload_name in WORKLOAD_DIRS:
         workload_dir = docs_root / rel_path
         if not workload_dir.is_dir():
-            print(f"Warning: {workload_dir} not found, skipping {workload_name}")
-            continue
+            # A renamed upstream folder would silently drop a whole product, too small for the shrink check.
+            raise SystemExit(f"::error::exchange: {workload_dir} not found; the upstream layout changed or the clone failed")
 
         count = 0
         for md_file in sorted(workload_dir.glob('*.md')):
-            result = parse_cmdlet_doc(md_file, workload_name)
+            result = parse_cmdlet_doc(md_file, workload_name, workload_dir.name)
             if not result:
                 continue
 
@@ -224,8 +209,7 @@ def main():
 
     # Write per-module JSON files
     for mod_name, data in modules_data.items():
-        safe_name = mod_name.replace(' ', '_')
-        out_file = modules_dir / f'{safe_name}.json'
+        out_file = modules_dir / f'{mod_name}.json'
         with open(out_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
     print(f"Wrote {len(modules_data)} module JSON files to {modules_dir}")
