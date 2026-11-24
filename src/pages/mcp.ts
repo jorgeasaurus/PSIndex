@@ -4,7 +4,7 @@ import { handleMcp } from '../server/mcp';
 export const prerender = false;
 
 // The rest of the site is static. This route is the one Vercel function.
-const route: APIRoute = ({ request }) => handleMcp(request);
+const route: APIRoute = ({ request, url }) => handleMcp(request, url.origin);
 export const GET = route;
 export const POST = route;
 export const DELETE = route;
