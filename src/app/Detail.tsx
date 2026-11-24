@@ -1,10 +1,10 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ArrowLeft, ExternalLink, Link2 } from 'lucide-preact';
 import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
 import { isCommonParam, parseSyntax, tokenize, withDocumented } from './powershell';
-import { isWarnExtra, sourceOf, srcStyle } from './sources';
+import { AssetError, isWarnExtra, sourceOf, srcStyle } from './sources';
 import { entryUrl } from './url';
 import type { CmdletDetail, CmdletFile, Row, SourceMeta } from './types';
 
@@ -13,11 +13,20 @@ interface Props {
   client: SearchClient;
   onOpen: (r: Row) => void;
   onClose: () => void;
+  /** Move focus to the entry's title when it opens (the narrow-screen dialog). */
+  takeFocus: boolean;
 }
 
-export function Detail({ row, client, onOpen, onClose }: Props) {
+export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
   const [related, setRelated] = useState<Row[]>([]);
   const src = sourceOf(row.source);
+  const title = useRef<HTMLHeadingElement>(null);
+
+  // Focus the title when the entry is a dialog, or when the control that opened it is gone
+  // (a "Same noun" button belongs to the entry it replaces): focus would otherwise drop to <body>.
+  useEffect(() => {
+    if (takeFocus || document.activeElement === document.body) title.current?.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -29,26 +38,26 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
     <article class="detail" style={srcStyle(row.source)} aria-labelledby="detail-title">
       <div class="detail-head">
         <button type="button" class="icon-btn detail-back" onClick={onClose} aria-label="Back to results"><ArrowLeft size={18} /></button>
-        <h2 id="detail-title" class="detail-title">
-          <code>{row.name}</code>
+        <div class="detail-title-row">
+          <h2 id="detail-title" class="detail-title" tabIndex={-1} ref={title}><code>{breakable(row.name)}</code></h2>
           <CopyIconButton text={row.name} label="Copy name" />
-        </h2>
+        </div>
         <div class="tags">
           <span class="tag tag-source"><span class="source-dot" aria-hidden="true" />{src.short}</span>
           <span class="tag">{row.module}</span>
           {showsModuleVersion(row, src) && <span class="tag" title="Module version">v{row.moduleVersion}</span>}
           {row.verb && <span class="tag">{row.verb}</span>}
           {showsCategory(row) && <span class="tag">{row.category}</span>}
-          {row.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{row.extra}</span>}
+          {row.extra && src.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{src.extra.label} {row.extra}</span>}
           {row.perms > 0 && <span class="tag">{row.perms} permission{row.perms === 1 ? '' : 's'}</span>}
         </div>
         <div class="detail-links">
-          <a class="btn" href={learnUrl(row)} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} /></a>
+          <a class="btn" href={learnUrl(row)} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} aria-hidden="true" /><span class="sr-only"> (opens in a new tab)</span></a>
           <CopyTextButton text={entryUrl(row.key)} label="Copy link" icon={<Link2 size={14} />} />
         </div>
       </div>
 
-      <CmdletEntry row={row} />
+      <CmdletEntry row={row} onRetry={() => title.current?.focus({ preventScroll: true })} />
 
       {related.length > 0 && (
         <section class="block">
@@ -68,28 +77,39 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
   );
 }
 
-type EntryState = { status: 'loading' } | { status: 'failed'; message: string } | { status: 'ok'; cmdlet: CmdletDetail };
+type EntryState = { status: 'loading' } | { status: 'failed'; error: AssetError } | { status: 'ok'; cmdlet: CmdletDetail };
 
-/** Loads the row's module file and renders its entry, or the loading / error state. */
-function CmdletEntry({ row }: { row: Row }) {
+/**
+ * Loads the row's module file and renders its entry, or the loading / error state. `onRetry` keeps
+ * focus in the entry when "Try again" is pressed (the button itself goes away while loading).
+ */
+function CmdletEntry({ row, onRetry }: { row: Row; onRetry: () => void }) {
   const [state, setState] = useState<EntryState>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0); // "Try again" loads the file afresh (failures aren't cached)
   useEffect(() => {
     let live = true;
+    setState({ status: 'loading' });
     loadModule(row.source, row.file)
       .then((file: CmdletFile) => {
-        // The build writes a row's file from the entries that hold its name, so a miss means the
-        // index and the file come from different deploys: report it like any failed load.
+        // The build writes each row's file from the entries that hold its name, so a miss is a broken file.
         const cmdlet = file[row.name];
-        if (!cmdlet) throw new Error(`no record for ${row.name}`);
+        if (!cmdlet) throw new AssetError('The server sent a damaged file.', 'reload');
         if (live) setState({ status: 'ok', cmdlet });
       })
-      .catch((e) => live && setState({ status: 'failed', message: e.message }));
+      .catch((e: AssetError) => live && setState({ status: 'failed', error: e }));
     return () => { live = false; };
-  }, [row.key]);
+  }, [row.key, attempt]);
 
   switch (state.status) {
     case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
-    case 'failed': return <p class="notice notice-error" role="alert">Couldn’t load details ({state.message}). Check your connection and pick the cmdlet again.</p>;
+    case 'failed': return (
+      <div class="notice notice-error" role="alert">
+        <p>Couldn’t load the details. {state.error.message}</p>
+        {state.error.fix === 'reload'
+          ? <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
+          : <button type="button" class="chip" onClick={() => { onRetry(); setAttempt((a) => a + 1); }}>Try again</button>}
+      </div>
+    );
     case 'ok': return <CmdletBody c={state.cmdlet} />;
   }
 }
@@ -111,39 +131,44 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
       {sets.length > 0 && (
         <section class="block">
           <h3>Syntax{sets.length > 1 ? <span class="h-note"> · {sets.length} parameter sets</span> : null}</h3>
-          {sets.map((groups, i) => <SyntaxBlock key={i} groups={groups} />)}
+          {sets.map((groups, i) => <SyntaxBlock key={i} groups={groups} label={sets.length > 1 ? `Copy parameter set ${i + 1}` : 'Copy syntax'} />)}
         </section>
       )}
 
-      {visible.length > 0 && (
+      {params.length > 0 && (
         <section class="block">
           <h3>Parameters</h3>
-          <table class="params">
-            <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col"><span class="sr-only">Required</span></th></tr></thead>
+          {visible.length > 0 && <table class="params">
+            <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col"><span class="sr-only">Required or positional</span></th></tr></thead>
             <tbody>
               {visible.map((p) => (
                 <tr key={p.name}>
                   <td><code class="t-param">-{p.name}</code>{p.description ? <p class="param-desc">{p.description}</p> : null}</td>
-                  <td><code class="t-type">{p.type}</code></td>
+                  <td><code class="t-type">{breakable(p.type)}</code></td>
                   <td>{p.required ? <span class="tag tag-req">Required</span> : p.positional ? <span class="tag">Positional</span> : null}</td>
                 </tr>
               ))}
             </tbody>
-          </table>
-          {hidden > 0 && <button type="button" class="link-btn" onClick={() => setShowCommon(true)}>Show {hidden} pipeline and proxy parameters</button>}
+          </table>}
+          {(hidden > 0 || showCommon) && (
+            <button type="button" class="link-btn" aria-expanded={showCommon} onClick={() => setShowCommon((s) => !s)}>
+              {showCommon ? 'Hide' : `Show ${hidden}`} pipeline and proxy parameters
+            </button>
+          )}
         </section>
       )}
 
       {perms.length > 0 && (
         <section class="block">
-          <h3>Permissions <CopyIconButton text={perms.join(', ')} label="Copy all permissions" small /></h3>
+          {/* The copy button sits beside the heading, not in it: heading navigation reads just "Permissions". */}
+          <div class="block-head"><h3>Permissions</h3><CopyIconButton text={perms.join(', ')} label="Copy all permissions" small /></div>
           <ul class="perms">{perms.map((p) => <li key={p}><code>{p}</code></li>)}</ul>
         </section>
       )}
 
       <section class="block">
         <h3>Examples</h3>
-        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
+        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} label={`Copy example ${i + 1}`} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
       </section>
     </>
   );
@@ -152,27 +177,37 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
 const renderTokens = (s: string) => tokenize(s).map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>));
 
 /** One parameter set: each top-level group is a non-wrapping unit, so lines only break between parameters. */
-function SyntaxBlock({ groups }: { groups: string[] }) {
+function SyntaxBlock({ groups, label }: { groups: string[]; label: string }) {
   const body = useMemo(() => groups.flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderTokens(g)}</span>]), [groups]);
-  return <CodeFrame copy={groups.join(' ')} syntax>{body}</CodeFrame>;
+  return <CodeFrame copy={groups.join(' ')} label={label} syntax>{body}</CodeFrame>;
 }
 
-function CodeBlock({ src }: { src: string }) {
+function CodeBlock({ src, label }: { src: string; label: string }) {
   const body = useMemo(() => renderTokens(src), [src]);
-  return <CodeFrame copy={src}>{body}</CodeFrame>;
+  return <CodeFrame copy={src} label={label}>{body}</CodeFrame>;
 }
 
-function CodeFrame({ copy, syntax, children }: { copy: string; syntax?: boolean; children: ComponentChildren }) {
+/** `label` names the copy button apart from the page's others ("Copy example 2"). */
+function CodeFrame({ copy, label, syntax, children }: { copy: string; label: string; syntax?: boolean; children: ComponentChildren }) {
   return (
     <div class={'code' + (syntax ? ' code-syntax' : '')}>
       <pre><code>{children}</code></pre>
-      <CopyIconButton text={copy} label="Copy code" small />
+      <CopyIconButton text={copy} label={label} small />
     </div>
   );
 }
 
-/** A category tag adds nothing when it repeats the module ("Groups" for Microsoft.Graph.Groups). */
-const showsCategory = (row: Row) => !!row.category && row.category !== row.module && !row.module.endsWith('.' + row.category);
+/**
+ * Text with line-break opportunities at word boundaries: after "-" and ".", and before each
+ * capital that starts a word (camel case). Long names then wrap at a readable point, not mid-word.
+ */
+function breakable(s: string) {
+  const parts = s.split(/(?<=[-.])|(?<=[a-z0-9])(?=[A-Z])/);
+  return parts.flatMap((p, i) => (i ? [<wbr key={i} />, p] : [p]));
+}
+
+/** A category tag adds nothing when the module name already says it ("Groups" for Microsoft.Graph.Groups, "Teams" for MicrosoftTeams). */
+const showsCategory = (row: Row) => !!row.category && !row.module.toLowerCase().includes(row.category.toLowerCase().replace(/\s+/g, ''));
 
 /** A module's own version, when it says more than its source's (Teams 8.1.0 under Exchange 3.9.2; each Az.* module). */
 const showsModuleVersion = (row: Row, src: SourceMeta) => !!row.moduleVersion && row.moduleVersion !== src.version;

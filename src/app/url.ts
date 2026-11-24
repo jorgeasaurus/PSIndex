@@ -8,10 +8,9 @@ const OPEN = 'c';
 
 /** One filter's URL parameter: its name, and how its value is read and written (null = omitted). */
 interface Codec<T> { param: string; read: (raw: string | null) => T; write: (v: T) => string | null }
-const text = (param: string): Codec<string> => ({ param, read: (raw) => raw ?? '', write: (v) => v || null });
+const text = (param: string): Codec<string> => ({ param, read: (raw) => raw?.trim() ?? '', write: (v) => v || null });
 
 const CODECS: { [K in keyof Filters]: Codec<Filters[K]> } = {
-  // Unknown or stale source ids mean every source.
   source: { param: 's', read: parseScope, write: (v) => (v === ALL.id ? null : v) },
   verb: text('verb'),
   module: text('module'),
@@ -25,9 +24,12 @@ const FILTER_KEYS = Object.keys(CODECS) as (keyof Filters)[];
 
 function filtersFrom(p: URLSearchParams): Filters {
   const read = <K extends keyof Filters>(k: K) => CODECS[k].read(p.get(CODECS[k].param));
+  const source = read('source');
+  // Module and extra (API, site role) are facets of one source: across every source they don't apply.
+  const perSource = source !== ALL.id;
   return {
-    source: read('source'), verb: read('verb'), module: read('module'),
-    category: read('category'), extra: read('extra'), examples: read('examples'),
+    source, verb: read('verb'), module: perSource ? read('module') : '',
+    category: read('category'), extra: perSource ? read('extra') : '', examples: read('examples'),
   };
 }
 
@@ -41,12 +43,13 @@ export interface UrlState { q: string; filters: Filters; open: string }
 
 export function readUrl(): UrlState {
   const p = new URLSearchParams(location.search);
-  return { q: p.get(QUERY) ?? '', filters: filtersFrom(p), open: p.get(OPEN) ?? '' };
+  // Pasted links often carry stray spaces; a blank value is no value.
+  return { q: (p.get(QUERY) ?? '').trim(), filters: filtersFrom(p), open: (p.get(OPEN) ?? '').trim() };
 }
 
 export function writeUrl({ q, filters, open }: UrlState) {
   const p = new URLSearchParams();
-  if (q) p.set(QUERY, q);
+  if (q.trim()) p.set(QUERY, q.trim()); // a blank query is no query; padding is not part of it
   const write = <K extends keyof Filters>(k: K) => {
     const v = CODECS[k].write(filters[k]);
     if (v !== null) p.set(CODECS[k].param, v);
@@ -55,7 +58,7 @@ export function writeUrl({ q, filters, open }: UrlState) {
   if (open) p.set(OPEN, open);
   const qs = p.toString();
   const url = location.pathname + (qs ? '?' + qs : '');
-  if (url !== location.pathname + location.search) history.replaceState(null, '', url);
+  if (url !== location.pathname + location.search) history.replaceState(history.state, '', url); // keeps the entry's state (the narrow-screen dialog's)
 }
 
 /** Absolute link that opens one entry. */

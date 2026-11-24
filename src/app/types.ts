@@ -82,8 +82,19 @@ export interface Facets {
   extras: string[];
 }
 
+/** The state of a scope's description files. 'failed': only names were searched. */
+export type Descriptions = 'loading' | 'ready' | 'failed';
+
 /** One search's answer; `id` is the search's, so a re-run of the same search keeps it. */
-export interface Results { id: number; q: string; refs: Int32Array; facets: Facets; ms: number }
+export interface Results {
+  id: number;
+  q: string;
+  refs: Int32Array;
+  facets: Facets;
+  ms: number;
+  /** Whether descriptions were searched too. While they load the search re-runs once they arrive. */
+  descriptions: Descriptions;
+}
 
 /** Request/reply pairs answered by the worker. */
 export interface Requests {

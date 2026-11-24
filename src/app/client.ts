@@ -9,18 +9,27 @@ interface Handlers {
   onLoadError: (message: string) => void;
 }
 
-/** Owns the search worker. Search replies older than the latest search are dropped. */
+/**
+ * Owns the search worker. At most one search is with the worker at a time: while one runs, only the
+ * latest query waits, so fast typing never queues a backlog of stale searches (a slow typo scan
+ * would otherwise make results lag seconds behind the box). Replies older than the latest are dropped.
+ */
 export class SearchClient {
   private worker = new Worker(new URL('./search.worker.ts', import.meta.url), { type: 'module' });
   private seq = 0;
   private latestSearch = 0;
+  private running = 0; // id of the search the worker is working on (0: none)
+  private waiting: Extract<ToWorker, { type: 'search' }> | null = null;
   private pending = new Map<number, (reply: Reply) => void>();
 
   constructor(h: Handlers) {
     this.worker.onmessage = ({ data: m }: MessageEvent<FromWorker>) => {
       switch (m.type) {
         case 'load-error': return h.onLoadError(m.message);
-        case 'results': if (m.id === this.latestSearch) h.onResults(m); return;
+        case 'results':
+          if (m.id === this.running) this.sendWaiting();
+          if (m.id === this.latestSearch) h.onResults(m);
+          return;
         case 'reply': this.pending.get(m.id)?.(m.reply); this.pending.delete(m.id); return;
       }
     };
@@ -28,7 +37,14 @@ export class SearchClient {
 
   search(q: string, filters: Filters) {
     this.latestSearch = ++this.seq;
-    this.post({ type: 'search', id: this.latestSearch, q, filters });
+    this.waiting = { type: 'search', id: this.latestSearch, q, filters };
+    if (!this.running) this.sendWaiting();
+  }
+
+  private sendWaiting() {
+    this.running = this.waiting?.id ?? 0;
+    if (this.waiting) this.post(this.waiting);
+    this.waiting = null;
   }
 
   /** Id of the latest search sent; results carry it once they answer that search. */

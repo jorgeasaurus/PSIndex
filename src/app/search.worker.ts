@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { artifactPath } from './artifacts';
-import { SOURCES, fetchAsset, queryTokens, scopeOf } from './sources';
-import type { Facets, Filters, FromWorker, IndexShard, RequestType, Requests, Row, ToWorker } from './types';
+import { SOURCES, fetchAsset, flatMatch, queryTokens, scopeOf } from './sources';
+import type { Facets, Filters, FromWorker, IndexShard, RequestType, Requests, Row, ToWorker, Descriptions } from './types';
 
 const SHIFT = 20; // ref = (sourceIndex << SHIFT) | rowIndex
 const ROW_MASK = (1 << SHIFT) - 1;
@@ -13,9 +13,11 @@ interface Loaded {
   lname: string[];
   lflat: string[]; // name without hyphens, so "getmguser" finds Get-MgUser
   lnoun: string[];
+  words: number[][]; // where each word of the noun starts in lname (camel case: Get-MgUserLicense -> MgUserLicense, UserLicense, License)
   dup: Uint8Array; // 1 where the name repeats within this source (Entra v1.0/beta, Teams/Skype…)
   desc: string[] | null;
   ldesc: string[] | null;
+  descriptions: Descriptions;
 }
 
 type Search = { id: number; q: string; filters: Filters };
@@ -49,17 +51,21 @@ async function loadSource(si: number): Promise<Loaded> {
     lname,
     lflat: lname.map((n) => n.replace(/-/g, '')),
     lnoun: lname.map((n) => (n.indexOf('-') > 0 ? n.slice(n.indexOf('-') + 1) : '')),
+    words: shard.n.map(wordStarts),
     dup: Uint8Array.from(shard.n, (n) => (count.get(n)! > 1 ? 1 : 0)),
     desc: null,
     ldesc: null,
+    descriptions: 'loading',
   };
 }
 
 async function loadDescriptions(L: Loaded) {
-  const desc = await fetchAsset<string[]>(artifactPath.desc(L.id)).catch(() => null);
-  if (!desc) return; // descriptions only refine ranking; without them names still search
+  // Descriptions only refine matching: without them names still search, and the page says so.
+  const desc = await fetchAsset<string[]>(artifactPath.desc(L.id)).catch((e) => (console.error('[psindex] descriptions failed', L.id, e), null));
+  if (!desc) { L.descriptions = 'failed'; return; }
   L.desc = desc;
   L.ldesc = desc.map((d) => d.toLowerCase());
+  L.descriptions = 'ready';
 }
 
 /**
@@ -76,28 +82,15 @@ index.then(async (all) => {
   if (lastSearch) runSearch(all, lastSearch);
 }, (e) => {
   console.error('[psindex] index load failed', e);
-  post({ type: 'load-error', message: String(e?.message ?? e) });
+  post({ type: 'load-error', message: e instanceof Error ? e.message : String(e) });
 });
 
-function fuzzy(t: string, s: string): number {
-  // Subsequence match; rewards contiguous runs. Returns 0 when not a subsequence.
-  let si = 0, run = 0, score = 0;
-  for (let ti = 0; ti < t.length; ti++) {
-    const ch = t.charCodeAt(ti);
-    let found = false;
-    while (si < s.length) {
-      if (s.charCodeAt(si++) === ch) { found = true; break; }
-      run = 0;
-    }
-    if (!found) return 0;
-    run++;
-    score += run;
-  }
-  return score;
-}
-
-/** `t` is a lower-cased query token (see queryTokens). */
-function scoreToken(tt: string, L: Loaded, i: number): number {
+/**
+ * Literal match of one lower-cased query token (see queryTokens) against row i, best first:
+ * whole name, name prefix, noun prefix, anywhere in the name, the name without hyphens
+ * ("getmguser"), then the description. 0 when the token does not occur.
+ */
+function literalScore(tt: string, L: Loaded, i: number): number {
   const name = L.lname[i];
   if (name === tt) return 1000;
   if (name.startsWith(tt)) return 800 - Math.min(100, name.length - tt.length);
@@ -105,19 +98,70 @@ function scoreToken(tt: string, L: Loaded, i: number): number {
   if (noun && noun.startsWith(tt)) return 700 - Math.min(100, noun.length - tt.length);
   const at = name.indexOf(tt);
   if (at >= 0) return 520 - Math.min(120, at);
-  const flatT = tt.replace(/-/g, '');
-  if (flatT !== tt || flatT.length >= 4) {
-    const fa = L.lflat[i].indexOf(flatT);
+  if (tt.includes('-') || tt.length >= 4) {
+    const fa = flatMatch(name, L.lflat[i], tt);
     if (fa >= 0) return 480 - Math.min(120, fa);
-  }
-  if (tt.length >= 4) {
-    // Typo tolerance: subsequence with long contiguous runs only.
-    const f = fuzzy(tt, name);
-    const perfect = (tt.length * (tt.length + 1)) / 2;
-    if (f >= perfect * 0.45) return 120 + Math.round((f / perfect) * 80) - Math.min(60, name.length - tt.length);
   }
   if (L.ldesc?.[i].includes(tt)) return 60;
   return 0;
+}
+
+/** Edits a typo may contain: none below 5 letters, one up to 10, two beyond. */
+const typoBudget = (len: number) => (len < 5 ? 0 : len <= 10 ? 1 : 2);
+
+/**
+ * Fewest edits (insert, delete, substitute, swap neighbours) turning `t` into some prefix of `s`
+ * whose length is within `max` of t's, or max + 1 once it is certainly more. One table, so every
+ * prefix length is checked in a single pass.
+ */
+function prefixDistance(t: string, s: string, max: number): number {
+  // Within max edits, one of t's first max+1 letters must sit among s's first 2*max+1: a cheap
+  // test that rejects almost every candidate before the table is built.
+  const head = s.slice(0, 2 * max + 1);
+  let near = false;
+  for (let k = 0; k <= max && k < t.length && !near; k++) near = head.includes(t[k]);
+  if (!near) return max + 1;
+  const cols = Math.min(s.length, t.length + max);
+  let prev2: number[] = [];
+  let prev = Array.from({ length: cols + 1 }, (_, j) => j);
+  for (let i = 1; i <= t.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= cols; j++) {
+      let d = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (t[i - 1] === s[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && t[i - 1] === s[j - 2] && t[i - 2] === s[j - 1]) d = Math.min(d, prev2[j - 2] + 1);
+      cur.push(d);
+      if (d < rowMin) rowMin = d;
+    }
+    if (rowMin > max) return max + 1;
+    prev2 = prev;
+    prev = cur;
+  }
+  let best = max + 1;
+  for (let j = Math.max(0, t.length - max); j <= cols; j++) best = Math.min(best, prev[j]);
+  return best;
+}
+
+/** Where each word of a cmdlet's noun starts: after the verb's hyphen, and at each camel-case capital. */
+function wordStarts(name: string): number[] {
+  const verbEnd = name.indexOf('-');
+  if (verbEnd <= 0) return [];
+  const out = [verbEnd + 1];
+  for (let j = verbEnd + 2; j < name.length; j++) if (/[A-Z]/.test(name[j]) && /[a-z0-9]/.test(name[j - 1])) out.push(j);
+  return out;
+}
+
+/**
+ * A misspelt token: within the typo budget of the start of the name, of the hyphen-free name, or
+ * of any word of the noun ("licnse" ~ the License in Set-MgUserLicense).
+ */
+function typoScore(tt: string, L: Loaded, i: number): number {
+  const max = typoBudget(tt.length);
+  if (!max) return 0;
+  const name = L.lname[i];
+  let best = prefixDistance(tt, L.lflat[i], max);
+  for (let k = -1; k < L.words[i].length && best > 0; k++) best = Math.min(best, prefixDistance(tt, k < 0 ? name : name.slice(L.words[i][k]), max));
+  return best > max ? 0 : 300 - 100 * best - Math.min(60, L.lname[i].length - tt.length);
 }
 
 function passes(L: Loaded, i: number, f: Filters): boolean {
@@ -147,13 +191,16 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   const tokens = queryTokens(q);
   const { sources, perSourceFacets } = scopeOf(filters.source);
   const scope = all.filter((L) => sources.some((s) => s.id === L.id));
+  // A token with any literal hit in scope (under the filters) matches literally; one with none is
+  // read as a typo. Typo matches never mix with real ones, so an exact name isn't buried in near misses.
+  const typo = tokens.map((t) => !scope.some((L) => L.shard.n.some((_, i) => passes(L, i, filters) && literalScore(t, L, i) > 0)));
   const hits: { ref: number; score: number; len: number }[] = [];
   for (const L of scope) {
     for (let i = 0; i < L.shard.n.length; i++) {
       if (!passes(L, i, filters)) continue;
       let score = tokens.length ? 0 : 1; // no query: everything matches, in index order
-      for (const t of tokens) {
-        const s = scoreToken(t, L, i);
+      for (let k = 0; k < tokens.length; k++) {
+        const s = typo[k] ? typoScore(tokens[k], L, i) : literalScore(tokens[k], L, i);
         if (!s) { score = 0; break; }
         score += s;
       }
@@ -162,8 +209,12 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   }
   if (tokens.length) hits.sort((a, b) => b.score - a.score || a.len - b.len || a.ref - b.ref);
   const refs = Int32Array.from(hits, (h) => h.ref);
-  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0 }, [refs.buffer]);
+  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0, descriptions: descriptionsOf(scope) }, [refs.buffer]);
 }
+
+/** A scope's descriptions: still loading if any source's are, else failed if any source's did. */
+const descriptionsOf = (scope: Loaded[]): Descriptions =>
+  scope.some((L) => L.descriptions === 'loading') ? 'loading' : scope.some((L) => L.descriptions === 'failed') ? 'failed' : 'ready';
 
 function rowOf(all: Loaded[], ref: number): Row {
   const [L, i] = decodeRef(all, ref);
@@ -190,14 +241,14 @@ function rowOf(all: Loaded[], ref: number): Row {
  * (an old unqualified link, or a module that no longer applies). Names match case-insensitively.
  */
 function refOfKey(all: Loaded[], key: string): number | null {
-  const { source, name, module } = parseKey(key);
+  // Links are matched case-insensitively throughout: people retype and re-case them.
+  const { source, name, module } = parseKey(key.toLowerCase());
   const L = all.find((x) => x.id === source);
   if (!L) return null;
-  const lower = name.toLowerCase();
   let first = -1;
   for (let i = 0; i < L.lname.length; i++) {
-    if (L.lname[i] !== lower) continue;
-    if (!module || L.shard.mods[L.shard.m[i]] === module) return encodeRef(L, i);
+    if (L.lname[i] !== name) continue;
+    if (!module || L.shard.mods[L.shard.m[i]].toLowerCase() === module) return encodeRef(L, i);
     if (first < 0) first = i;
   }
   return first < 0 ? null : encodeRef(L, first);
@@ -231,9 +282,8 @@ const answer = (all: Loaded[], m: Exclude<ToWorker, { type: 'search' }>) => hand
 // Messages are handled in arrival order: each waits on the same `index` promise, whose callbacks run in order.
 self.onmessage = ({ data: m }: MessageEvent<ToWorker>) => {
   if (m.type === 'search') {
-    lastSearch = m;
-    // Only the latest search is worth running; older ones that queued behind the load are dropped.
-    index.then((all) => { if (m === lastSearch) runSearch(all, m); }, () => {});
+    lastSearch = m; // re-run when descriptions arrive
+    index.then((all) => runSearch(all, m), () => {}); // the client sends one search at a time
     return;
   }
   // After a failed load nothing is answered: the page shows the load error instead.
