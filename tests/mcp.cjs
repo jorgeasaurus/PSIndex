@@ -83,6 +83,9 @@ async function runMcp(base, check) {
   const badModule = toolData((await rpc(base, 6, 'tools/call', { name: 'search_cmdlets', arguments: { query: 'Get-MgUser', module: 'Not.A.Module' } }, headers)).body);
   check(badModule.error?.isError && /Unknown module/.test(badModule.error.message), 'mcp search_cmdlets unknown module', badModule.error?.message || JSON.stringify(badModule).slice(0, 200));
 
+  const punct = toolData((await rpc(base, 11, 'tools/call', { name: 'search_cmdlets', arguments: { query: '---' } }, headers)).body);
+  check(punct.error && /letter or digit/i.test(punct.error.message) && !punct.data?.results, 'mcp search_cmdlets rejects punctuation-only query', punct.error?.message || JSON.stringify(punct).slice(0, 200));
+
   const tooMany = await rpc(base, 7, 'tools/call', { name: 'search_cmdlets', arguments: { query: 'Get-MgUser', limit: 100 } }, headers);
   const limitError = tooMany.body?.error?.message || (tooMany.body?.result?.isError ? textOf(tooMany.body.result) : '');
   check(!!limitError && /25|limit|validation|too big/i.test(limitError), 'mcp search_cmdlets rejects limit over 25', limitError.slice(0, 240) || tooMany.text.slice(0, 240));

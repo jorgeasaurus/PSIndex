@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { artifactPath } from '../app/artifacts';
 import { parseSyntax, withDocumented } from '../app/powershell';
 import { prepareSource, rowOf, rowsNamed, searchHits, setDescriptions, type Loaded } from '../app/search-core';
-import { SOURCES } from '../app/sources';
+import { SOURCES, queryTokens } from '../app/sources';
 import type { CmdletFile, IndexShard, Row } from '../app/types';
 import { EMPTY_FILTERS } from '../app/url';
 import generated from '../sources.generated.json';
@@ -138,6 +138,9 @@ function hit(origin: string, row: Row): CmdletHit {
 }
 
 export async function searchCmdlets(origin: string, query: string, module: string | undefined, limit: number): Promise<ToolResult<{ results: CmdletHit[]; truncated: boolean }>> {
+  // The site lists every cmdlet for an empty box. A query of only punctuation has no tokens
+  // (queryTokens), and the ranker would do the same. That is not a search.
+  if (!queryTokens(query).length) return { ok: false, message: 'Query needs a letter or digit. Punctuation alone matches nothing.' };
   const all = await loadIndex();
   let canonical = '';
   if (module) {

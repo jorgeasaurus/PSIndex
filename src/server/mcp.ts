@@ -45,7 +45,7 @@ function createServer(origin: string) {
     title: 'Search cmdlets',
     description: 'Search the PSIndex catalog of Microsoft Graph, Azure (Az), Entra, Exchange/Teams/SharePoint, and Configuration Manager PowerShell cmdlets. Matches names (hyphens optional, so getmguser finds Get-MgUser) and short descriptions, using the same ranking as the website. Returns name, module, source, a short description, and the PSIndex page URL.',
     inputSchema: {
-      query: z.string().trim().min(1).max(200).describe('Name, noun, or words to search for. Hyphens are optional.'),
+      query: z.string().trim().min(1).max(200).refine((q) => /[a-z0-9]/i.test(q), 'Query needs a letter or digit.').describe('Name, noun, or words to search for. Must contain a letter or digit. Hyphens are optional.'),
       module: z.string().trim().min(1).max(200).optional().describe('Limit results to this PowerShell module, for example Microsoft.Graph.Users. Case-insensitive.'),
       limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe(`Maximum results to return. Default ${DEFAULT_LIMIT}, maximum ${MAX_LIMIT}.`),
     },
