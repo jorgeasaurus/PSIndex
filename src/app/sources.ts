@@ -20,11 +20,28 @@ export const SOURCE_LABELS = list.format(SOURCES.map((s) => s.label));
  */
 export const assetUrl = (path: string) => `/a/${generated.build}/${path.split('/').map(encodeURIComponent).join('/')}`;
 
-/** Fetch a build artifact as JSON (page or worker); a non-2xx response fails with its status and path. */
+/** A request that takes longer than this has stalled: it fails instead of loading forever. */
+const FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * Fetch a build artifact as JSON (page or worker). Failures carry a message written for the
+ * reader, by cause: no answer, an artifact this build no longer has (the page is from an older
+ * deploy), a server error, or a damaged file.
+ */
 export async function fetchAsset<T>(path: string): Promise<T> {
-  const r = await fetch(assetUrl(path));
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${path}`);
-  return r.json();
+  let r: Response;
+  try {
+    r = await fetch(assetUrl(path), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  } catch {
+    throw new Error('The server didn’t answer. Check your connection.');
+  }
+  if (r.status === 404) throw new Error('This page is out of date: a newer version of PSIndex has been published. Reload the page.');
+  if (!r.ok) throw new Error(`The server answered with an error (HTTP ${r.status}).`);
+  try {
+    return await r.json();
+  } catch {
+    throw new Error('The server sent a damaged file.');
+  }
 }
 
 /** The extra value a source flags as a caution, e.g. Graph's "beta" API. */

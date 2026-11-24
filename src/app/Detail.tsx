@@ -48,7 +48,7 @@ export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
           {showsModuleVersion(row, src) && <span class="tag" title="Module version">v{row.moduleVersion}</span>}
           {row.verb && <span class="tag">{row.verb}</span>}
           {showsCategory(row) && <span class="tag">{row.category}</span>}
-          {row.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{row.extra}</span>}
+          {row.extra && src.extra && <span class={'tag' + (isWarnExtra(src, row.extra) ? ' tag-warn' : '')}>{src.extra.label} {row.extra}</span>}
           {row.perms > 0 && <span class="tag">{row.perms} permission{row.perms === 1 ? '' : 's'}</span>}
         </div>
         <div class="detail-links">
@@ -82,23 +82,29 @@ type EntryState = { status: 'loading' } | { status: 'failed'; message: string } 
 /** Loads the row's module file and renders its entry, or the loading / error state. */
 function CmdletEntry({ row }: { row: Row }) {
   const [state, setState] = useState<EntryState>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0); // "Try again" loads the file afresh (failures aren't cached)
   useEffect(() => {
     let live = true;
+    setState({ status: 'loading' });
     loadModule(row.source, row.file)
       .then((file: CmdletFile) => {
-        // The build writes a row's file from the entries that hold its name, so a miss means the
-        // index and the file come from different deploys: report it like any failed load.
+        // The build writes each row's file from the entries that hold its name, so a miss is a broken file.
         const cmdlet = file[row.name];
-        if (!cmdlet) throw new Error(`no record for ${row.name}`);
+        if (!cmdlet) throw new Error('The server sent a damaged file.');
         if (live) setState({ status: 'ok', cmdlet });
       })
       .catch((e) => live && setState({ status: 'failed', message: e.message }));
     return () => { live = false; };
-  }, [row.key]);
+  }, [row.key, attempt]);
 
   switch (state.status) {
     case 'loading': return <div class="detail-skel" aria-busy="true" aria-label="Loading details"><span /><span /><span /><span /></div>;
-    case 'failed': return <p class="notice notice-error" role="alert">Couldn’t load details ({state.message}). Check your connection and pick the cmdlet again.</p>;
+    case 'failed': return (
+      <div class="notice notice-error" role="alert">
+        <p>Couldn’t load the details. {state.message}</p>
+        <button type="button" class="chip" onClick={() => setAttempt((a) => a + 1)}>Try again</button>
+      </div>
+    );
     case 'ok': return <CmdletBody c={state.cmdlet} />;
   }
 }
@@ -193,8 +199,8 @@ function breakable(s: string) {
   return parts.flatMap((p, i) => (i ? [<wbr key={i} />, p] : [p]));
 }
 
-/** A category tag adds nothing when it repeats the module ("Groups" for Microsoft.Graph.Groups). */
-const showsCategory = (row: Row) => !!row.category && row.category !== row.module && !row.module.endsWith('.' + row.category);
+/** A category tag adds nothing when the module name already says it ("Groups" for Microsoft.Graph.Groups, "Teams" for MicrosoftTeams). */
+const showsCategory = (row: Row) => !!row.category && !row.module.toLowerCase().includes(row.category.toLowerCase().replace(/\s+/g, ''));
 
 /** A module's own version, when it says more than its source's (Teams 8.1.0 under Exchange 3.9.2; each Az.* module). */
 const showsModuleVersion = (row: Row, src: SourceMeta) => !!row.moduleVersion && row.moduleVersion !== src.version;

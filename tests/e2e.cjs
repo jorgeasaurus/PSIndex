@@ -124,6 +124,26 @@ const scenarios = [
     },
   },
   {
+    name: 'links and load failures',
+    // The deliberately failed module fetch logs its own console error.
+    allowErrors: true,
+    async run(p, ctx) {
+      await p.goto(`${BASE}/?c=graph:Get-MgNoSuchThing`);
+      await p.waitForSelector('.notice-link');
+      check(!param(p, 'c'), 'a link to a missing cmdlet says so (and leaves the URL)', await p.textContent('.notice-link p'));
+      await p.goto(`${BASE}/?c=EXCHANGE:get-csexternalaccesspolicy@microsoftteams`);
+      await titleIs(p, 'Get-CsExternalAccessPolicy');
+      await p.waitForFunction(() => new URLSearchParams(location.search).get('c') === 'exchange:Get-CsExternalAccessPolicy@MicrosoftTeams');
+      // The first load of a module file fails; "Try again" loads it.
+      let failed = false;
+      await ctx.route(`**${BUILD_PATH}data/graph/**`, (r) => (failed ? r.continue() : ((failed = true), r.fulfill({ status: 500, body: '' }))));
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      await p.waitForSelector('.detail .notice-error');
+      await p.click('.detail .notice-error button');
+      await p.waitForSelector('.detail .code-syntax');
+    },
+  },
+  {
     name: 'arrow keys and Enter',
     async run(p) {
       await p.goto(BASE);

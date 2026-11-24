@@ -76,7 +76,7 @@ index.then(async (all) => {
   if (lastSearch) runSearch(all, lastSearch);
 }, (e) => {
   console.error('[psindex] index load failed', e);
-  post({ type: 'load-error', message: String(e?.message ?? e) });
+  post({ type: 'load-error', message: e instanceof Error ? e.message : String(e) });
 });
 
 /**
@@ -216,14 +216,14 @@ function rowOf(all: Loaded[], ref: number): Row {
  * (an old unqualified link, or a module that no longer applies). Names match case-insensitively.
  */
 function refOfKey(all: Loaded[], key: string): number | null {
-  const { source, name, module } = parseKey(key);
+  // Links are matched case-insensitively throughout: people retype and re-case them.
+  const { source, name, module } = parseKey(key.toLowerCase());
   const L = all.find((x) => x.id === source);
   if (!L) return null;
-  const lower = name.toLowerCase();
   let first = -1;
   for (let i = 0; i < L.lname.length; i++) {
-    if (L.lname[i] !== lower) continue;
-    if (!module || L.shard.mods[L.shard.m[i]] === module) return encodeRef(L, i);
+    if (L.lname[i] !== name) continue;
+    if (!module || L.shard.mods[L.shard.m[i]].toLowerCase() === module) return encodeRef(L, i);
     if (first < 0) first = i;
   }
   return first < 0 ? null : encodeRef(L, first);

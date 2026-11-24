@@ -61,9 +61,10 @@ function useNarrow() {
  *   link:  a deep-linked key is being looked up (only ever the URL's)
  *   enter: Enter was pressed for search `enter`; it opens that search's cursor row once its
  *          results are on screen, and `shown` stays open meanwhile
+ *   missing: the deep link named no cmdlet in the index (renamed or removed); the intro says so
  * Every change is one setSel, so a new choice always replaces a pending one.
  */
-type Selection = { row: Row } | { link: string } | { enter: number; shown: Row | null } | null;
+type Selection = { row: Row } | { link: string } | { enter: number; shown: Row | null } | { missing: string } | null;
 /** A pending Enter given up: the pane goes back to what it showed. */
 const settle = (s: Selection): Selection => (s && 'enter' in s ? s.shown && { row: s.shown } : s);
 
@@ -97,6 +98,7 @@ function Search() {
   const open = !sel ? null : 'row' in sel ? sel.row : 'enter' in sel ? sel.shown : null;
   const link = sel && 'link' in sel ? sel.link : '';
   const enterFor = sel && 'enter' in sel ? sel.enter : null;
+  const missing = sel && 'missing' in sel ? sel.missing : '';
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
   const openKey = open?.key ?? link;
   // Each entry opens at its top (the pane, not the article, is what scrolls).
@@ -107,7 +109,7 @@ function Search() {
   useEffect(() => {
     if (!link) return;
     let live = true; // opening or closing an entry replaces the selection and supersedes this lookup
-    client.request('find', { key: link }).then((row) => live && setSel(row && { row }));
+    client.request('find', { key: link }).then((row) => live && setSel(row ? { row } : { missing: link }));
     return () => { live = false; };
   }, [link]);
 
@@ -220,6 +222,13 @@ function Search() {
       toolbar={
         <>
           <Toolbar label={countLabel} timing={timing} filterCount={filterCount} showFilters={showFilters} onToggleFilters={() => setShowFilters((s) => !s)} />
+          {/* Above the results, so it shows at every width (narrow screens hide the detail pane). */}
+          {missing && (
+            <div class="notice notice-error notice-link" role="status">
+              <p>The linked cmdlet <code>{missing}</code> isn’t in the index. It may have been renamed or removed.</p>
+              <button type="button" class="chip" onClick={close}>Dismiss</button>
+            </div>
+          )}
           {showFilters && (
             <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={() => setFilters({ ...EMPTY_FILTERS, source: filters.source })} />
           )}

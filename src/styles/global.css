@@ -63,6 +63,7 @@
     --tok-num: #b8402c;
     --tok-op: #5a6480;
     --danger: #b3261e;
+    --warn: #8a5a00; /* amber dark enough for text on white */
     --shadow: 0 12px 40px -18px rgb(20 30 60 / 0.25), 0 2px 6px -2px rgb(20 30 60 / 0.08);
   }
 }
@@ -88,6 +89,7 @@
   --tok-num: #b8402c;
   --tok-op: #5a6480;
   --danger: #b3261e;
+  --warn: #8a5a00;
   --shadow: 0 12px 40px -18px rgb(20 30 60 / 0.25), 0 2px 6px -2px rgb(20 30 60 / 0.08);
 }
 
@@ -191,8 +193,9 @@ a { color: inherit; text-underline-offset: 3px; }
   transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease);
 }
 .searchbox:focus-within {
-  border-color: color-mix(in oklab, var(--src) 70%, transparent);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--src) 18%, transparent);
+  /* Ink-mixed like every focus ring, so it stays visible on the light ground too. */
+  border-color: color-mix(in oklab, var(--src) 75%, var(--ink-mix));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--src) 35%, transparent);
 }
 .searchbox-icon { position: absolute; left: 18px; color: var(--faint); pointer-events: none; }
 .searchbox input {
@@ -351,8 +354,9 @@ kbd {
   align-content: center;
   gap: 2px;
 }
-.result.is-active { --row-bg: var(--surface-2); }
-.result.is-open { --row-bg: color-mix(in oklab, var(--src) 13%, var(--surface-solid)); }
+/* Cursor and open row: a tint plus an edge bar, so neither relies on a faint background alone. */
+.result.is-active { --row-bg: var(--surface-3); box-shadow: inset 3px 0 0 var(--line-strong); }
+.result.is-open { --row-bg: color-mix(in oklab, var(--src) 16%, var(--surface-solid)); box-shadow: inset 3px 0 0 color-mix(in oklab, var(--src) 80%, var(--ink-mix)); }
 .result-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .result-name {
   font-size: 14px;
@@ -513,7 +517,9 @@ kbd {
 .detail-skel span:nth-child(2) { height: 90px; }
 .detail-skel span:nth-child(3) { width: 40%; }
 .detail-skel span:nth-child(4) { height: 140px; }
-.notice { margin: 20px 0 0; padding: 12px 14px; border-radius: 10px; font-size: 14px; }
+.notice { margin: 20px 0 0; padding: 12px 14px; border-radius: 10px; font-size: 14px; display: grid; gap: 10px; justify-items: start; }
+.notice p { margin: 0; }
+.notice-link { margin: 0 12px 10px; overflow-wrap: anywhere; }
 .notice-error { color: var(--danger); background: color-mix(in oklab, var(--danger) 10%, transparent); border: 1px solid color-mix(in oklab, var(--danger) 30%, transparent); }
 
 /* ---------- Intro (no selection) ---------- */
@@ -576,5 +582,6 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  /* Stop animations outright: a shortened infinite animation still flickers every frame. */
+  *, *::before, *::after { animation: none !important; transition-duration: 0.01ms !important; }
 }

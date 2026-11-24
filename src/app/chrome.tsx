@@ -202,7 +202,7 @@ export function LoadFailed({ message }: { message: string }) {
   return (
     <div class="empty" role="alert">
       <p class="empty-title">The search index didn’t load.</p>
-      <p>{message}. Check your connection, then reload the page.</p>
+      <p>{message}</p>
       <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
     </div>
   );

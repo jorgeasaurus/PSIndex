@@ -21,11 +21,14 @@ const description = `Search ${formatCount(TOTAL)} ${SOURCE_LABELS} cmdlets in on
     <meta property="og:description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script is:inline define:vars={{ THEME_KEY }}>
-      try { const t = localStorage.getItem(THEME_KEY); if (t) document.documentElement.dataset.theme = t; } catch {}
+      try { const t = localStorage.getItem(THEME_KEY); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
     </script>
   </head>
   <body>
     <App client:load />
-    <noscript><p style="padding:24px">PSIndex searches in your browser and needs JavaScript.</p></noscript>
+    <noscript>
+      <style>.app { display: none; }</style>
+      <p style="padding:24px;max-width:60ch">PSIndex searches in your browser and needs JavaScript. Turn it on for this site, or look cmdlets up on <a href="https://learn.microsoft.com/powershell/">Microsoft Learn</a>.</p>
+    </noscript>
   </body>
 </html>
