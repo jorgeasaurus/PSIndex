@@ -3,6 +3,7 @@
 import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
+import { McpPanel } from './mcp-panel';
 import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, srcStyle } from './sources';
 import type { Descriptions, Facets, Filters, SourceId } from './types';
 
@@ -87,6 +88,7 @@ export function Band({ q, source, placeholder, inputRef, handlers, live, activeI
         </a>
         <p class="tagline" data-quiet>PowerShell cmdlets for {SOURCE_NAMES}. One index.</p>
         <div class="band-actions" data-quiet>
+          <McpPanel />
           <button class="icon-btn" type="button" onClick={onToggleTheme} aria-label="Dark theme" aria-pressed={dark}>
             <Sun class="i-sun" size={18} /><Moon class="i-moon" size={18} />
           </button>

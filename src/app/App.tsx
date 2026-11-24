@@ -120,6 +120,9 @@ function Search() {
   const escape = useRef(() => {});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The MCP dialog closes itself on Escape, and its focus trap owns Tab. preventDefault here
+      // would cancel that close, and "/" would pull focus out of the dialog.
+      if (document.querySelector('dialog[open]')) return;
       const typing = (e.target as HTMLElement)?.closest('input:not([type=checkbox]), textarea, select');
       if ((e.key === '/' && !typing) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();
