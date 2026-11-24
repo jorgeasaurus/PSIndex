@@ -7,9 +7,11 @@ import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, srcStyle } from './sour
 import type { Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
-export function Frame({ source, isOpen, inert, canvasRef, detailRef, band, toolbar, results, detail }: {
+export function Frame({ source, isOpen, dialog, inert, canvasRef, detailRef, band, toolbar, results, detail }: {
   source: SourceId;
   isOpen: boolean;
+  /** Narrow screens: the open entry covers the results as a modal dialog. */
+  dialog: boolean;
   /** The static server-rendered frame, before the search session takes over. */
   inert: boolean;
   canvasRef: Ref<HTMLCanvasElement>;
@@ -24,8 +26,8 @@ export function Frame({ source, isOpen, inert, canvasRef, detailRef, band, toolb
       <canvas ref={canvasRef} class="field" aria-hidden="true" />
       {band}
       <main class="work">
-        <section class="pane pane-results" aria-label="Results">{toolbar}{results}</section>
-        <section class="pane pane-detail" aria-label="Details" ref={detailRef}>{detail}</section>
+        <section class="pane pane-results" aria-label="Results" inert={dialog}>{toolbar}{results}</section>
+        <section class="pane pane-detail" ref={detailRef} {...(dialog ? { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'detail-title' } : { 'aria-label': 'Details' })}>{detail}</section>
       </main>
     </div>
   );
@@ -56,16 +58,22 @@ function caretPoint(el: HTMLInputElement) {
   return { x: Math.min(r.right - 24, x), y: r.top + r.height / 2 };
 }
 
-export function Band({ q, source, placeholder, inputRef, handlers }: {
+export function Band({ q, source, placeholder, inputRef, handlers, live, activeId, inert }: {
   q: string;
   source: SourceId;
   placeholder: string;
   inputRef: Ref<HTMLInputElement>;
   handlers: BandHandlers;
+  /** False for the server-rendered shell: the box is read-only until the search session can act on input. */
+  live: boolean;
+  /** id of the result row under the keyboard cursor ('' for none), for assistive tech. */
+  activeId: string;
+  /** Behind the narrow-screen detail dialog. */
+  inert?: boolean;
 }) {
   const { onQuery, onKeyDown, onClear, onHome, onToggleTheme, onPickSource } = handlers;
   return (
-    <header class="band">
+    <header class="band" inert={inert}>
       <div class="band-top">
         <a class="wordmark" data-quiet href="/" aria-label="PSIndex home" onClick={(e) => { e.preventDefault(); onHome(); }}>
           <span class="wordmark-ps">PS</span>Index
@@ -85,11 +93,16 @@ export function Band({ q, source, placeholder, inputRef, handlers }: {
           ref={inputRef}
           type="search"
           value={q}
-          autoFocus
+          readOnly={!live}
           spellcheck={false}
           autoComplete="off"
+          role="combobox"
+          list={undefined /* no datalist: the results list is the popup (aria-controls) */}
+          aria-expanded="true"
+          aria-autocomplete="list"
           aria-label="Search cmdlets"
           aria-controls="results"
+          aria-activedescendant={activeId || undefined}
           placeholder={placeholder}
           onInput={(e) => { const el = e.target as HTMLInputElement; onQuery(el.value, caretPoint(el)); }}
           onKeyDown={onKeyDown}

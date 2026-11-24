@@ -25,10 +25,11 @@ function Shell() {
     <Frame
       source={ALL.id}
       isOpen={false}
+      dialog={false}
       inert
       canvasRef={createRef()}
       detailRef={createRef()}
-      band={<Band q="" source={ALL.id} placeholder={ALL.placeholder} inputRef={createRef()} handlers={INERT_BAND} />}
+      band={<Band q="" source={ALL.id} placeholder={ALL.placeholder} inputRef={createRef()} handlers={INERT_BAND} live={false} activeId="" />}
       toolbar={<Toolbar label="Loading index…" filterCount={0} showFilters={false} onToggleFilters={() => {}} />}
       results={<ResultsSkeleton />}
       detail={<Intro onPick={() => {}} />}
@@ -37,6 +38,19 @@ function Shell() {
 }
 
 const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] };
+
+/** Narrow screens show the open entry over the results (the 900px breakpoint in global.css). */
+const NARROW = '(max-width: 900px)';
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => matchMedia(NARROW).matches);
+  useEffect(() => {
+    const mq = matchMedia(NARROW);
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return narrow;
+}
 
 
 // ---- Search session ------------------------------------------------------------------------
@@ -70,6 +84,11 @@ function Search() {
   const scope = scopeOf(filters.source);
   const { theme, toggle: toggleTheme } = useTheme();
   const pulse = useAsciiField(canvasRef, scope.color, theme);
+  const narrow = useNarrow();
+  const [activeId, setActiveId] = useState('');
+
+  // The search box is the keyboard hub: it has focus once the session is live.
+  useEffect(() => inputRef.current?.focus({ preventScroll: true }), []);
 
   // A layout effect, so the search is sent within the render: a key pressed right after typing
   // (Enter) already sees it as the latest, not a passive effect still waiting for the next frame.
@@ -92,7 +111,11 @@ function Search() {
     return () => { live = false; };
   }, [link]);
 
-  // Global keys: "/" or Ctrl/Cmd+K focuses search.
+  // Global keys, from anywhere on the page:
+  //   "/" or Ctrl/Cmd+K focuses search;
+  //   Escape closes the open entry (back to the search box), or else clears the query.
+  // Escape's default is prevented: the search input would also clear itself natively.
+  const escape = useRef(() => {});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement)?.closest('input, textarea, select');
@@ -100,6 +123,9 @@ function Search() {
         e.preventDefault();
         inputRef.current?.focus();
         inputRef.current?.select();
+      } else if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('select')) {
+        e.preventDefault();
+        escape.current();
       }
     };
     addEventListener('keydown', onKey);
@@ -117,6 +143,18 @@ function Search() {
     if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
   }, []);
   const close = useCallback(() => setSel(null), []);
+  /**
+   * Back from the entry (Back button, Escape): focus returns to the search box once the entry is
+   * closed, i.e. after the render that lifts the narrow-screen dialog's inert from the band.
+   */
+  const refocus = useRef(false);
+  const back = () => { refocus.current = true; close(); };
+  useEffect(() => {
+    if (open || !refocus.current) return;
+    refocus.current = false;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [open]);
+  escape.current = () => { if (openKey) back(); else if (q) setQ(''); };
 
   // Resolve a pending Enter once its search's results are the ones on screen.
   useEffect(() => {
@@ -129,9 +167,8 @@ function Search() {
   }, [enterFor, results?.id]);
 
   const onKeyDown = (e: KeyboardEvent) => {
-    // The box is autofocused, so the "/" shortcut lands here; nobody searches for a leading slash.
-    if (e.key === '/' && !(e.target as HTMLInputElement).value) { e.preventDefault(); return; }
-    if (e.key === 'Escape') { if (openKey) close(); else if (q) setQ(''); return; }
+    // No cmdlet name contains "/", so it is only ever the focus shortcut: never typed into the query.
+    if (e.key === '/') { e.preventDefault(); return; }
     const nav = listRef.current;
     if (!nav) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); nav.move(1); }
@@ -155,6 +192,7 @@ function Search() {
     <Frame
       source={filters.source}
       isOpen={!!open}
+      dialog={!!open && narrow}
       inert={false}
       canvasRef={canvasRef}
       detailRef={detailRef}
@@ -164,6 +202,9 @@ function Search() {
           source={filters.source}
           placeholder={scope.placeholder}
           inputRef={inputRef}
+          live
+          activeId={activeId}
+          inert={!!open && narrow}
           handlers={{
             onQuery: (value, caret) => { setQ(value); pulse(caret); },
             onKeyDown,
@@ -190,15 +231,16 @@ function Search() {
             results={results}
             openKey={openKey}
             onOpen={openRow}
+            onCursor={setActiveId}
             query={q}
-            empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => setFilters(EMPTY_FILTERS)} />}
+            empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => { setFilters(EMPTY_FILTERS); inputRef.current?.focus(); }} />}
           />
         )
       }
       detail={
         open
           // Keyed by entry: each one starts fresh (no related list or body from the previous entry).
-          ? <Detail key={open.key} row={open} client={client} onOpen={openRow} onClose={close} />
+          ? <Detail key={open.key} row={open} client={client} onOpen={openRow} onClose={back} takeFocus={narrow} />
           : <Intro onPick={(s, sample) => { setSource(s); setQ(sample); inputRef.current?.focus(); }} />
       }
     />

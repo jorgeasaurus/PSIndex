@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ArrowLeft, ExternalLink, Link2 } from 'lucide-preact';
 import { loadModule, type SearchClient } from './client';
 import { CopyIconButton, CopyTextButton } from './copy';
@@ -13,11 +13,20 @@ interface Props {
   client: SearchClient;
   onOpen: (r: Row) => void;
   onClose: () => void;
+  /** Move focus to the entry's title when it opens (the narrow-screen dialog). */
+  takeFocus: boolean;
 }
 
-export function Detail({ row, client, onOpen, onClose }: Props) {
+export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
   const [related, setRelated] = useState<Row[]>([]);
   const src = sourceOf(row.source);
+  const title = useRef<HTMLHeadingElement>(null);
+
+  // Focus the title when the entry is a dialog, or when the control that opened it is gone
+  // (a "Same noun" button belongs to the entry it replaces): focus would otherwise drop to <body>.
+  useEffect(() => {
+    if (takeFocus || document.activeElement === document.body) title.current?.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -29,10 +38,10 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
     <article class="detail" style={srcStyle(row.source)} aria-labelledby="detail-title">
       <div class="detail-head">
         <button type="button" class="icon-btn detail-back" onClick={onClose} aria-label="Back to results"><ArrowLeft size={18} /></button>
-        <h2 id="detail-title" class="detail-title">
-          <code>{row.name}</code>
+        <div class="detail-title-row">
+          <h2 id="detail-title" class="detail-title" tabIndex={-1} ref={title}><code>{breakable(row.name)}</code></h2>
           <CopyIconButton text={row.name} label="Copy name" />
-        </h2>
+        </div>
         <div class="tags">
           <span class="tag tag-source"><span class="source-dot" aria-hidden="true" />{src.short}</span>
           <span class="tag">{row.module}</span>
@@ -43,7 +52,7 @@ export function Detail({ row, client, onOpen, onClose }: Props) {
           {row.perms > 0 && <span class="tag">{row.perms} permission{row.perms === 1 ? '' : 's'}</span>}
         </div>
         <div class="detail-links">
-          <a class="btn" href={learnUrl(row)} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} /></a>
+          <a class="btn" href={learnUrl(row)} target="_blank" rel="noopener">Microsoft Learn <ExternalLink size={14} aria-hidden="true" /><span class="sr-only"> (opens in a new tab)</span></a>
           <CopyTextButton text={entryUrl(row.key)} label="Copy link" icon={<Link2 size={14} />} />
         </div>
       </div>
@@ -124,13 +133,17 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
               {visible.map((p) => (
                 <tr key={p.name}>
                   <td><code class="t-param">-{p.name}</code>{p.description ? <p class="param-desc">{p.description}</p> : null}</td>
-                  <td><code class="t-type">{p.type}</code></td>
+                  <td><code class="t-type">{breakable(p.type)}</code></td>
                   <td>{p.required ? <span class="tag tag-req">Required</span> : p.positional ? <span class="tag">Positional</span> : null}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {hidden > 0 && <button type="button" class="link-btn" onClick={() => setShowCommon(true)}>Show {hidden} pipeline and proxy parameters</button>}
+          {(hidden > 0 || showCommon) && (
+            <button type="button" class="link-btn" aria-expanded={showCommon} onClick={() => setShowCommon((s) => !s)}>
+              {showCommon ? 'Hide' : `Show ${hidden}`} pipeline and proxy parameters
+            </button>
+          )}
         </section>
       )}
 
@@ -169,6 +182,15 @@ function CodeFrame({ copy, syntax, children }: { copy: string; syntax?: boolean;
       <CopyIconButton text={copy} label="Copy code" small />
     </div>
   );
+}
+
+/**
+ * Text with line-break opportunities at word boundaries: after "-" and ".", and before each
+ * capital that starts a word (camel case). Long names then wrap at a readable point, not mid-word.
+ */
+function breakable(s: string) {
+  const parts = s.split(/(?<=[-.])|(?<=[a-z0-9])(?=[A-Z])/);
+  return parts.flatMap((p, i) => (i ? [<wbr key={i} />, p] : [p]));
 }
 
 /** A category tag adds nothing when it repeats the module ("Groups" for Microsoft.Graph.Groups). */

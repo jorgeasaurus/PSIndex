@@ -62,6 +62,46 @@ const scenarios = [
     },
   },
   {
+    name: 'focus and Escape',
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      const focused = () => p.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName);
+      check((await focused()) === 'Search cmdlets', 'search box has focus once the page is live', await focused());
+      await search(p, 'get-mguser', 'Get-MgUser');
+      await p.click('.result');
+      await titleIs(p, 'Get-MgUser');
+      check((await focused()) === 'Search cmdlets', 'clicking a result keeps focus in the search box', await focused());
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => !document.querySelector('.detail-title'));
+      check((await p.inputValue('input[type=search]')) === 'get-mguser', 'Escape closes the entry and keeps the query', await p.inputValue('input[type=search]'));
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => document.querySelector('input[type=search]').value === '');
+      await p.keyboard.type('get/');
+      check((await p.inputValue('input[type=search]')) === 'get', '"/" never enters the query', await p.inputValue('input[type=search]'));
+    },
+  },
+  {
+    name: 'narrow-screen entry dialog',
+    context: { viewport: { width: 390, height: 844 } },
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      await search(p, 'get-mguser', 'Get-MgUser');
+      await p.keyboard.press('Enter');
+      await titleIs(p, 'Get-MgUser');
+      await p.waitForFunction(() => document.activeElement?.id === 'detail-title');
+      const state = await p.evaluate(() => ({
+        dialog: document.querySelector('.pane-detail')?.getAttribute('role'),
+        bandInert: document.querySelector('.band')?.inert,
+        resultsInert: document.querySelector('.pane-results')?.inert,
+      }));
+      check(state.dialog === 'dialog' && state.bandInert && state.resultsInert, 'the open entry is a modal dialog that takes focus', JSON.stringify(state));
+      await p.click('.detail-back');
+      await p.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Search cmdlets');
+    },
+  },
+  {
     name: 'arrow keys and Enter',
     async run(p) {
       await p.goto(BASE);

@@ -22,12 +22,17 @@ interface Props {
   results: Results | null;
   openKey: string;
   onOpen: (r: Row) => void;
+  /** The cursor row's element id ('' when there is none), for the search box's aria-activedescendant. */
+  onCursor: (id: string) => void;
   query: string;
   empty: ComponentChildren;
 }
 
+/** Element id of the result row at position i. */
+const rowId = (i: number) => `result-${i}`;
+
 /** Virtualised result list: only the visible window of rows is materialised from the worker. */
-export function ResultList({ navRef, client, results, openKey, onOpen, query, empty }: Props) {
+export function ResultList({ navRef, client, results, openKey, onOpen, onCursor, query, empty }: Props) {
   const refs = results?.refs ?? null;
   const searchId = results?.id;
   const scroller = useRef<HTMLDivElement>(null);
@@ -38,6 +43,10 @@ export function ResultList({ navRef, client, results, openKey, onOpen, query, em
   const [cursor, setCursor] = useState<{ id: number | undefined; ref: number }>({ id: undefined, ref: -1 });
   const active = useMemo(() => (refs && cursor.id === searchId ? Math.max(0, refs.indexOf(cursor.ref)) : 0), [refs, cursor, searchId]);
   const setActive = (i: number) => refs && setCursor({ id: searchId, ref: refs[i] });
+
+  // Tell the search box which rendered row is under the cursor.
+  const cursorShown = !!refs?.length && rows.has(refs[active]) && active >= range.start && active < range.end;
+  useEffect(() => onCursor(cursorShown ? rowId(active) : ''), [cursorShown, active]);
 
   useImperativeHandle(navRef, () => ({
     move: (delta) => {
@@ -134,10 +143,14 @@ function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number
   const tag = row.dup ? row.module : isWarnExtra(sourceOf(row.source), row.extra) ? row.extra : '';
   return (
     <div
+      id={rowId(i)}
       role="option"
-      aria-selected={open}
+      aria-selected={active}
+      aria-current={open || undefined}
       class={'result' + (active ? ' is-active' : '') + (open ? ' is-open' : '')}
       style={{ top: `${i * ROW_H}px`, ...srcStyle(row.source) }}
+      // A click opens the row without taking focus from the search box, so the keyboard keeps working.
+      onMouseDown={(e) => e.preventDefault()}
       onClick={() => onOpen(row)}
       onMouseMove={() => !active && onHover(i)}
     >
