@@ -124,9 +124,9 @@ export function Band({ q, source, placeholder, inputRef, handlers, live, expande
         />
         {q && live ? (
           <button class="icon-btn searchbox-clear" type="button" aria-label="Clear search" onClick={onClear}><X size={16} /></button>
-        ) : (
+        ) : live ? (
           <kbd class="searchbox-kbd" aria-hidden="true">/</kbd>
-        )}
+        ) : null}
       </div>
 
       <SourceStrip>

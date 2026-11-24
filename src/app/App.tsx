@@ -247,6 +247,7 @@ function Search() {
     else if (q) setQ('');
   };
   toSearch.current = () => {
+    if (loadError) return; // the box is read-only: nothing to type into
     if (dialog) { dropEntry(); closeToSearch('select'); return; }
     inputRef.current?.focus();
     inputRef.current?.select();

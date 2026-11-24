@@ -69,11 +69,18 @@ export const isWarnExtra = (s: SourceMeta, extra: string) => !!extra && extra ==
 export const queryWords = (q: string) =>
   q.split(/\s+/).map((w) => w.replace(/^[^a-z0-9-]+|[^a-z0-9-]+$/gi, '')).filter((w) => /[a-z0-9]/i.test(w));
 
-/** Query tokens as both the worker and the highlighter match them: the words, lower-cased. */
-export const queryTokens = (q: string) => queryWords(q).map((w) => w.toLowerCase());
+/** A parameter as written on a command line ("-All", "-UserId"): no cmdlet name starts with one. */
+const isParameter = (w: string) => /^-[a-z]/i.test(w);
 
-/** The text of a query that searches something: trimmed, or '' when it has no token ("", "--"). */
-export const searchText = (q: string) => (queryWords(q).length ? q.trim() : '');
+/**
+ * Query tokens as both the worker and the highlighter match them: the words, lower-cased, without
+ * parameters. A pasted 'Get-MgUser -All' searches for Get-MgUser; "-all" would otherwise match
+ * inside unrelated names (InstalledApp) through the hyphen-free comparison.
+ */
+export const queryTokens = (q: string) => queryWords(q).filter((w) => !isParameter(w)).map((w) => w.toLowerCase());
+
+/** The text of a query that searches something: trimmed, or '' when it has no token ("", "--", "-All"). */
+export const searchText = (q: string) => (queryTokens(q).length ? q.trim() : '');
 
 /**
  * The first word shaped like a cmdlet name ("Get-MgUser": letters, a hyphen, then the noun), or
@@ -143,7 +150,6 @@ const SCOPES = new Map<SourceId, Scope>([
   }]),
 ]);
 
-/** A scope id from outside (the URL): unknown or missing ids, e.g. stale links, mean every source. */
 /** A URL's source id, read case-insensitively ("?s=Graph"); unknown or stale ids mean every source. */
 export const parseScope = (raw: string | null): SourceId => {
   const id = raw?.trim().toLowerCase();

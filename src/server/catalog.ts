@@ -144,7 +144,7 @@ function hit(origin: string, row: Row): CmdletHit {
 export async function searchCmdlets(origin: string, query: string, module: string | undefined, limit: number): Promise<ToolResult<{ results: CmdletHit[]; truncated: boolean; namesOnly: string[] }>> {
   // The site lists every cmdlet for an empty box. A query of only punctuation has no tokens
   // (queryTokens), and the ranker would do the same. That is not a search.
-  if (!queryTokens(query).length) return { ok: false, message: 'Query needs an ASCII letter or digit; cmdlet names are ASCII, so punctuation or other scripts alone match nothing.' };
+  if (!queryTokens(query).length) return { ok: false, message: 'Query needs a word with an ASCII letter or digit: cmdlet names are ASCII, so punctuation, other scripts or parameters alone (-All) match nothing.' };
   const all = await loadIndex();
   let canonical = '';
   if (module) {

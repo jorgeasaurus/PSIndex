@@ -143,6 +143,7 @@ async function runMcp(base, check) {
   const invalid = [
     ['punctuation-only query', { query: '---' }, /Input validation error: .*Query needs an ASCII letter or digit; cmdlet names are ASCII\. at query/],
     ['non-ASCII query', { query: 'Получить' }, /Input validation error: .*Query needs an ASCII letter or digit; cmdlet names are ASCII\. at query/],
+    ['parameter-only query', { query: '-All' }, /parameters alone \(-All\) match nothing/],
     ['empty query', { query: '   ' }, /Input validation error: .* at query/],
     ['limit over 25', { query: 'Get-MgUser', limit: 100 }, /Input validation error: .*<=25 at limit/],
     ['limit 0', { query: 'Get-MgUser', limit: 0 }, /Input validation error: .*>=1 at limit/],

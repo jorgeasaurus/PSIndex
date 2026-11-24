@@ -42,6 +42,23 @@ async function hold(ctx, pattern) {
  */
 const scenarios = [
   {
+    name: 'a pasted command line searches its cmdlet',
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      await search(p, 'Get-MgUser -All', 'Get-MgUser');
+      const marks = await p.$$eval('.result mark', (m) => m.map((x) => x.textContent));
+      check(!marks.some((t) => /^all$/i.test(t)), 'a parameter is not matched inside names', marks.slice(0, 5).join(','));
+    },
+  },
+  {
+    name: '404 page icon',
+    async run(p) {
+      await p.goto(`${BASE}/404.html`);
+      check(await p.locator('link[rel=icon][href="/favicon.svg"]').count() === 1, 'the 404 page has the site icon');
+    },
+  },
+  {
     name: 'phone Back from a deep link',
     context: { viewport: { width: 390, height: 844 } },
     async run(p) {
@@ -370,10 +387,14 @@ const scenarios = [
       const before = new URL(p.url()).search;
       const band = await p.evaluate(() => ({
         clear: !!document.querySelector('.searchbox-clear'),
+        kbd: !!document.querySelector('.searchbox-kbd'),
         tabs: [...document.querySelectorAll('.source')].every((b) => b.disabled),
         placeholder: document.querySelector('input[type=search]').placeholder,
       }));
-      check(!band.clear && band.tabs && band.placeholder === 'Index unavailable', 'a failed load offers no search actions in the band', JSON.stringify(band));
+      check(!band.clear && !band.kbd && band.tabs && band.placeholder === 'Index unavailable', 'a failed load offers no search actions in the band', JSON.stringify(band));
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press('/');
+      check(await p.evaluate(() => document.activeElement?.getAttribute('aria-label') !== 'Search cmdlets'), '"/" does not focus the read-only box after a failed load');
       await p.keyboard.press('Escape');
       await p.click('.wordmark');
       await nextFrame(p);
@@ -754,7 +775,8 @@ const scenarios = [
     async run(p) {
       await p.goto(BASE);
       await rowsReady(p);
-      await p.fill('input[type=search]', 'Get-MgUser -UserId x');
+      // Parameters are not searched; a value that matches nothing still empties the list.
+      await p.fill('input[type=search]', 'Get-MgUser -UserId qqzzqq');
       await p.waitForSelector('.empty .chip');
       check((await p.textContent('.empty .chip')) === 'Search Get-MgUser', 'a pasted command line offers its cmdlet name', await p.textContent('.empty .chip'));
       await p.click('.empty .chip');
