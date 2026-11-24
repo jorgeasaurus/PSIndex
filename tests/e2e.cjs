@@ -81,6 +81,12 @@ const scenarios = [
       await search(p, 'Get-MgUser -All', 'Get-MgUser');
       const marks = await p.$$eval('.result mark', (m) => m.map((x) => x.textContent));
       check(!marks.some((t) => /^all$/i.test(t)), 'a parameter is not matched inside names', marks.slice(0, 5).join(','));
+      // Parameters alone search nothing: the full list stays, with a note saying why.
+      await p.fill('input[type=search]', '-All');
+      await p.waitForSelector('.notice-link:has-text("aren’t searched")');
+      check(!param(p, 'q'), 'a parameter-only query is no query in the URL', p.url());
+      await p.fill('input[type=search]', 'Get-MgUser -All');
+      await p.waitForFunction(() => !document.querySelector('.notice-link'));
     },
   },
   {

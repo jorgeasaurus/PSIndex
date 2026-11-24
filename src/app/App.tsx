@@ -5,8 +5,8 @@ import { useAsciiField } from './ascii';
 import { useTheme } from './theme';
 import { ResultList, ResultsSkeleton, type ListNav } from './ResultList';
 import { Detail } from './Detail';
-import { Band, DescriptionsFailed, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
-import { ALL, formatCount, scopeOf, searchText } from './sources';
+import { Band, DescriptionsFailed, EmptyState, ParametersNotSearched, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
+import { ALL, formatCount, scopeOf, searchText, parametersOnly } from './sources';
 import { EMPTY_FILTERS, activeFilters, readUrl, sameFilters, urlOf, writeUrl, type UrlState } from './url';
 import type { Facets, Filters, Results, Row, SourceId } from './types';
 
@@ -341,6 +341,7 @@ function Search() {
             </div>
           )}
           {!!results?.descriptions.failed.length && <DescriptionsFailed sources={results.descriptions.failed} />}
+          {parametersOnly(q).length > 0 && <ParametersNotSearched words={parametersOnly(q)} />}
           {showFilters && !loadError && (
             <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={clearFilters} />
           )}

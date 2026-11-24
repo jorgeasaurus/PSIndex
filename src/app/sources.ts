@@ -79,6 +79,12 @@ const isParameter = (w: string) => /^-[a-z]/i.test(w);
  */
 export const queryTokens = (q: string) => queryWords(q).filter((w) => !isParameter(w)).map((w) => w.toLowerCase());
 
+/** The parameters of a query that has nothing else ("-All -Top"): [] when it has a word to search. */
+export const parametersOnly = (q: string) => {
+  const words = queryWords(q);
+  return words.length && words.every(isParameter) ? words : [];
+};
+
 /** The text of a query that searches something: trimmed, or '' when it has no token ("", "--", "-All"). */
 export const searchText = (q: string) => (queryTokens(q).length ? q.trim() : '');
 

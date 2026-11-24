@@ -269,6 +269,18 @@ export function EmptyState({ q, inLabel, hidden, descriptionsLoading, onSearch, 
   );
 }
 
+/**
+ * A query of parameters alone ("-All") searches nothing, so every cmdlet is listed as for an empty
+ * box: say why, so the full list is not read as matching the parameter.
+ */
+export function ParametersNotSearched({ words }: { words: string[] }) {
+  return (
+    <div class="notice notice-link" role="status">
+      <p>Parameters such as <code>{words[0]}</code> aren’t searched: cmdlets are found by name and description. Type part of a cmdlet name.</p>
+    </div>
+  );
+}
+
 /** Shown while some sources' descriptions failed to load: those sources are searched by name alone. */
 export function DescriptionsFailed({ sources }: { sources: SourceId[] }) {
   return (
