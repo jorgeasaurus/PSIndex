@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import output_dir, source_version
+from common import gallery_dependencies, output_dir, source_version
 
 # ── Category mapping ──────────────────────────────────────────────────────────
 CATEGORY_MAP = [
@@ -207,15 +207,9 @@ def main():
     descriptions = {}
     modules_data = {}  # module_name -> {version, cmdlets: {}}
 
-    # Find module version files
-    module_version_map = {}
-    for ver_file in azps_dir.rglob('*.md'):
-        fm = parse_front_matter(ver_file.read_text(encoding='utf-8', errors='replace'))
-        if 'Module Version' in fm and 'Module Name' in fm:
-            mn = fm['Module Name']
-            mv = fm['Module Version']
-            if mn not in module_version_map:
-                module_version_map[mn] = mv
+    # Each Az.* module's version is the one the Az rollup release bundles (the docs' own
+    # "Module Version" front matter is a 0.0.0 placeholder).
+    module_version_map = gallery_dependencies('Az', version)
 
     # Scan Az.* module directories
     for mod_dir in sorted(azps_dir.iterdir()):
