@@ -4,8 +4,8 @@ import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { McpPanel } from './mcp-panel';
-import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, srcStyle } from './sources';
-import type { Descriptions, Facets, Filters, SourceId } from './types';
+import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, formatList, isVerbNoun, queryWords, sourceOf, srcStyle } from './sources';
+import type { Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
 export function Frame({ source, isOpen, dialog, inert, canvasRef, detailRef, band, toolbar, results, detail }: {
@@ -59,14 +59,19 @@ function caretPoint(el: HTMLInputElement) {
   return { x: Math.min(r.right - 24, x), y: r.top + r.height / 2 };
 }
 
-export function Band({ q, source, placeholder, inputRef, handlers, live, activeId, inert, dark }: {
+export function Band({ q, source, placeholder, inputRef, handlers, live, expanded, activeId, inert, dark }: {
   q: string;
   source: SourceId;
   placeholder: string;
   inputRef: Ref<HTMLInputElement>;
   handlers: BandHandlers;
-  /** False for the server-rendered shell: the box is read-only until the search session can act on input. */
+  /**
+   * False for the server-rendered shell and after a failed index load: the box is read-only, and
+   * nothing that would change the search (tabs, clear) is offered.
+   */
   live: boolean;
+  /** The results list has options (the combobox's popup is open). */
+  expanded: boolean;
   /** id of the result row under the keyboard cursor ('' for none), for assistive tech. */
   activeId: string;
   /** Behind the narrow-screen detail dialog. */
@@ -108,31 +113,50 @@ export function Band({ q, source, placeholder, inputRef, handlers, live, activeI
           autoComplete="off"
           role="combobox"
           list={undefined /* no datalist: the results list is the popup (aria-controls) */}
-          aria-expanded={live}
+          aria-expanded={expanded}
           aria-autocomplete="list"
           aria-label="Search cmdlets"
-          aria-controls={live ? 'results' : undefined}
+          aria-controls={expanded ? 'results' : undefined}
           aria-activedescendant={activeId || undefined}
           placeholder={placeholder}
           onInput={(e) => { const el = e.target as HTMLInputElement; onQuery(el.value, caretPoint(el)); }}
           onKeyDown={onKeyDown}
         />
-        {q ? (
+        {q && live ? (
           <button class="icon-btn searchbox-clear" type="button" aria-label="Clear search" onClick={onClear}><X size={16} /></button>
         ) : (
           <kbd class="searchbox-kbd" aria-hidden="true">/</kbd>
         )}
       </div>
 
-      <nav class="sources" aria-label="Source">
-        <SourceTab id={ALL.id} label="All" count={TOTAL} current={source} onPick={onPickSource} />
-        {SOURCES.map((s) => <SourceTab key={s.id} id={s.id} label={s.short} count={s.count} current={source} onPick={onPickSource} />)}
-      </nav>
+      <SourceStrip>
+        <SourceTab id={ALL.id} label="All" count={TOTAL} current={source} disabled={!live} onPick={onPickSource} />
+        {SOURCES.map((s) => <SourceTab key={s.id} id={s.id} label={s.short} count={s.count} current={source} disabled={!live} onPick={onPickSource} />)}
+      </SourceStrip>
     </header>
   );
 }
 
-function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label: string; count: number; current: SourceId; onPick: (s: SourceId) => void }) {
+/**
+ * The tab strip. On narrow screens it scrolls sideways, and `data-more` marks that tabs lie past its
+ * right edge (the CSS fades that edge). Set on the element directly: it follows scrolling, not the render.
+ */
+function SourceStrip({ children }: { children: ComponentChildren }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ref.current!;
+    const mark = () => el.toggleAttribute('data-more', Math.ceil(el.scrollLeft + el.clientWidth) < el.scrollWidth);
+    mark();
+    el.addEventListener('scroll', mark, { passive: true });
+    // The strip's own size, and its tabs' (a late web font widens them).
+    const sizes = new ResizeObserver(mark);
+    for (const c of [el, ...el.children]) sizes.observe(c);
+    return () => { el.removeEventListener('scroll', mark); sizes.disconnect(); };
+  }, []);
+  return <nav ref={ref} class="sources" aria-label="Source">{children}</nav>;
+}
+
+function SourceTab({ id, label, count, current, disabled, onPick }: { id: SourceId; label: string; count: number; current: SourceId; disabled: boolean; onPick: (s: SourceId) => void }) {
   const on = id === current;
   const ref = useRef<HTMLButtonElement>(null);
   // The tab strip scrolls sideways on narrow screens; keep the selected tab in view.
@@ -141,7 +165,9 @@ function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label:
   useEffect(() => { if (on) centre(); }, [on]);
   return (
     // A tab reached by keyboard is centred too: at the strip's edge it would sit under the fade.
-    <button ref={ref} type="button" onFocus={centre} class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
+    // Only by keyboard (:focus-visible): a tap focuses on press, and scrolling then would move
+    // another tab under the finger before the release, so the tap would select nothing.
+    <button ref={ref} type="button" disabled={disabled} onFocus={() => ref.current?.matches(':focus-visible') && centre()} class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
       <span class="source-dot" aria-hidden="true" />
       {label}
       <span class="source-n">{formatCount(count)}</span>
@@ -201,23 +227,42 @@ function Select({ label, value, options, onChange }: { label: string; value: str
   );
 }
 
-export function EmptyState({ q, inLabel, filtered, descriptions, reset }: { q: string; inLabel: string; filtered: boolean; descriptions: Descriptions; reset: () => void }) {
+/**
+ * No results. `q` is the query ('' when it has no token). The hint comes from what was typed: a
+ * command line pasted with its parameters offers its cmdlet name alone, a lone cmdlet name its
+ * noun, several words fewer. No `onClearFilters`/`onSearchAll`: no filters are set, or the scope
+ * is already every source.
+ */
+export function EmptyState({ q, inLabel, descriptionsLoading, onSearch, onClearFilters, onSearchAll }: {
+  q: string;
+  inLabel: string;
+  descriptionsLoading: boolean;
+  onSearch: (q: string) => void;
+  onClearFilters?: () => void;
+  onSearchAll?: () => void;
+}) {
   // Descriptions load after names; until then a query that only a description matches finds nothing yet.
-  if (q && descriptions === 'loading') return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
+  if (q && descriptionsLoading) return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
+  const words = queryWords(q);
+  const name = words.find(isVerbNoun);
+  const suggest = (text: string) => <button type="button" class="chip" onClick={() => onSearch(text)}>Search <code>{text}</code></button>;
   return (
     <div class="empty">
       <p class="empty-title">{q ? <>No match for “{q}”{inLabel}.</> : 'Nothing matches these filters.'}</p>
-      {q && <p>Try the noun alone (<code>MgUser</code> instead of <code>Get-MgUser</code>), or fewer words.</p>}
-      {filtered && <button type="button" class="chip" onClick={reset}>Search all cmdlets</button>}
+      {name && words.length > 1 ? <><p>Parameters and values aren’t part of a cmdlet name. Search the name alone:</p>{suggest(name)}</>
+        : name ? <><p>Try the noun alone:</p>{suggest(name.slice(name.indexOf('-') + 1))}</>
+        : words.length > 1 && <p>Try fewer words.</p>}
+      {onClearFilters && <button type="button" class="chip" onClick={onClearFilters}>Clear filters</button>}
+      {onSearchAll && <button type="button" class="chip" onClick={onSearchAll}>Search all cmdlets</button>}
     </div>
   );
 }
 
-/** Shown while a scope's descriptions failed to load: results come from names alone. */
-export function DescriptionsFailed() {
+/** Shown while some sources' descriptions failed to load: those sources are searched by name alone. */
+export function DescriptionsFailed({ sources }: { sources: SourceId[] }) {
   return (
     <div class="notice notice-error notice-link" role="status">
-      <p>Descriptions didn’t load, so only cmdlet names are searched.</p>
+      <p>{formatList(sources.map((id) => sourceOf(id).short))} descriptions didn’t load, so only {sources.length > 1 ? 'their' : 'its'} cmdlet names are searched.</p>
       <button type="button" class="chip" onClick={() => location.reload()}>Reload</button>
     </div>
   );

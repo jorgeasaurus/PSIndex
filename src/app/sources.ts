@@ -9,6 +9,8 @@ const fmt = new Intl.NumberFormat('en-US');
 /** "40,931" — the one number format the site uses. */
 export const formatCount = (n: number) => fmt.format(n);
 const list = new Intl.ListFormat('en', { type: 'conjunction' });
+/** "Graph and MECM": names joined as running copy. */
+export const formatList = (items: string[]) => list.format(items);
 
 /** "Graph, Az, Entra, Exchange, and MECM" — for copy that names every source. */
 export const SOURCE_NAMES = list.format(SOURCES.map((s) => s.short));
@@ -59,16 +61,33 @@ export class AssetError extends Error {
 /** The extra value a source flags as a caution, e.g. Graph's "beta" API. */
 export const isWarnExtra = (s: SourceMeta, extra: string) => !!extra && extra === s.extra?.warn;
 
-/** Query tokens as both the worker and the highlighter split them: a token needs a letter or digit ("--" is no token). */
-export const queryTokens = (q: string) => q.toLowerCase().split(/\s+/).filter((t) => /[a-z0-9]/.test(t));
+/**
+ * The query's words as typed: split on whitespace, each trimmed of the punctuation around it, so a
+ * name pasted from a script or doc ('"Get-MgUser",') matches literally. Hyphens stay: they are part
+ * of names ("get-") and mark parameters ("-UserId"). A word needs a letter or digit ("--" is none).
+ */
+export const queryWords = (q: string) =>
+  q.split(/\s+/).map((w) => w.replace(/^[^a-z0-9-]+|[^a-z0-9-]+$/gi, '')).filter((w) => /[a-z0-9]/i.test(w));
+
+/** Query tokens as both the worker and the highlighter match them: the words, lower-cased. */
+export const queryTokens = (q: string) => queryWords(q).map((w) => w.toLowerCase());
+
+/** The text of a query that searches something: trimmed, or '' when it has no token ("", "--"). */
+export const searchText = (q: string) => (queryWords(q).length ? q.trim() : '');
+
+/** A word shaped like a cmdlet name ("Get-MgUser"): letters, a hyphen, then the noun. */
+export const isVerbNoun = (w: string) => /^[a-z]+-[a-z0-9]/i.test(w);
 
 /**
  * Where a token matches a lower-cased cmdlet name with every hyphen ignored ("getmguser" in
- * get-mguser): the index in the hyphen-free name, or -1. A match that runs from the verb into the
- * noun must take at least two letters of the noun, so an ordinary word like "removes" doesn't
- * match every Remove-S* cmdlet as "remove" + "s".
+ * get-mguser): the index in the hyphen-free name, or -1. The ranker and the highlighter both call
+ * this, so a name is only ever marked where it matched. A short hyphen-free token ("thi") never
+ * matches this way: across the verb/noun join it would hit nearly every name ("Get-HistoricalSearch"
+ * as "t-Hi"). A match that runs from the verb into the noun must take at least two letters of the
+ * noun, so an ordinary word like "removes" doesn't match every Remove-S* cmdlet as "remove" + "s".
  */
 export function flatMatch(lname: string, lflat: string, token: string): number {
+  if (!token.includes('-') && token.length < 4) return -1;
   const flatT = token.replace(/-/g, '');
   if (!flatT) return -1;
   const verbEnd = lname.indexOf('-'); // = the noun's start in the hyphen-free name

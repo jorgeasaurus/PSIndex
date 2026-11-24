@@ -1,7 +1,7 @@
 // The page's URL format: the search, its filters and the open entry. The only module that knows
 // parameter names, so links written by the app (history, "Copy link") and read back agree.
-import { ALL, parseScope } from './sources';
-import type { Filters } from './types';
+import { ALL, parseScope, scopeOf, searchText } from './sources';
+import type { Facets, Filters } from './types';
 
 const QUERY = 'q';
 const OPEN = 'c';
@@ -24,12 +24,12 @@ const FILTER_KEYS = Object.keys(CODECS) as (keyof Filters)[];
 
 function filtersFrom(p: URLSearchParams): Filters {
   const read = <K extends keyof Filters>(k: K) => CODECS[k].read(p.get(CODECS[k].param));
-  const source = read('source');
-  // Module and extra (API, site role) are facets of one source: across every source they don't apply.
-  const perSource = source !== ALL.id;
+  const scope = scopeOf(read('source'));
+  // Module and extra (API, site role) are facets of one source: across every source they don't
+  // apply, and extra not in a source that has none (?s=az&ver=beta).
   return {
-    source, verb: read('verb'), module: perSource ? read('module') : '',
-    category: read('category'), extra: perSource ? read('extra') : '', examples: read('examples'),
+    source: scope.id, verb: read('verb'), module: scope.perSourceFacets ? read('module') : '',
+    category: read('category'), extra: scope.extraLabel ? read('extra') : '', examples: read('examples'),
   };
 }
 
@@ -39,6 +39,18 @@ export const EMPTY_FILTERS = filtersFrom(new URLSearchParams());
 /** Filters narrowing the results within the chosen source (the source itself is shown by the tabs). */
 export const activeFilters = (f: Filters) => FILTER_KEYS.filter((k) => k !== 'source' && f[k] !== EMPTY_FILTERS[k]).length;
 
+export const sameFilters = (a: Filters, b: Filters) => FILTER_KEYS.every((k) => a[k] === b[k]);
+
+/**
+ * Facet values from a link match in any case (?verb=get); once the facets are known they take the
+ * facet's own spelling, so the URL and the filter bar read Get. The same object when nothing changes.
+ */
+export function canonicalFilters(f: Filters, facets: Facets): Filters {
+  const fix = (v: string, values: string[]) => (v && values.find((o) => o.toLowerCase() === v.toLowerCase())) || v;
+  const next = { ...f, verb: fix(f.verb, facets.verbs), module: fix(f.module, facets.modules), category: fix(f.category, facets.categories), extra: fix(f.extra, facets.extras) };
+  return sameFilters(next, f) ? f : next;
+}
+
 export interface UrlState { q: string; filters: Filters; open: string }
 
 export function readUrl(): UrlState {
@@ -47,9 +59,11 @@ export function readUrl(): UrlState {
   return { q: (p.get(QUERY) ?? '').trim(), filters: filtersFrom(p), open: (p.get(OPEN) ?? '').trim() };
 }
 
-export function writeUrl({ q, filters, open }: UrlState) {
+/** The page URL (path and query string) for a state. */
+export function urlOf({ q, filters, open }: UrlState) {
   const p = new URLSearchParams();
-  if (q.trim()) p.set(QUERY, q.trim()); // a blank query is no query; padding is not part of it
+  const text = searchText(q);
+  if (text) p.set(QUERY, text);
   const write = <K extends keyof Filters>(k: K) => {
     const v = CODECS[k].write(filters[k]);
     if (v !== null) p.set(CODECS[k].param, v);
@@ -57,7 +71,11 @@ export function writeUrl({ q, filters, open }: UrlState) {
   FILTER_KEYS.forEach(write);
   if (open) p.set(OPEN, open);
   const qs = p.toString();
-  const url = location.pathname + (qs ? '?' + qs : '');
+  return location.pathname + (qs ? '?' + qs : '');
+}
+
+export function writeUrl(state: UrlState) {
+  const url = urlOf(state);
   if (url !== location.pathname + location.search) history.replaceState(history.state, '', url); // keeps the entry's state (the narrow-screen dialog's)
 }
 

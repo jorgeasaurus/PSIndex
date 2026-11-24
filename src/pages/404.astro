@@ -2,13 +2,17 @@
 // Prerendered so an unknown URL stays a static 404. Only /mcp is a function.
 export const prerender = true;
 import '../styles/global.css';
+import ThemeScript from '../components/ThemeScript.astro';
 ---
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Not found — PSIndex</title>
     <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="dark light" />
+    <ThemeScript />
   </head>
   <body>
     <main style="max-width:36rem;margin:15vh auto;padding:0 24px">

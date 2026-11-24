@@ -17,7 +17,7 @@ export interface Loaded {
   dup: Uint8Array; // 1 where the name repeats within this source (Entra v1.0/beta, Teams/Skype…)
   desc: string[] | null;
   ldesc: string[] | null;
-  descriptions: Descriptions;
+  descriptions: 'loading' | 'ready' | 'failed';
 }
 
 /** Where each word of a cmdlet's noun starts: after the verb's hyphen, and at each camel-case capital. */
@@ -64,10 +64,11 @@ const decodeRef = (all: Loaded[], ref: number): [Loaded, number] => [all[ref >>>
  * repeats within its source. Cmdlet names never contain ':' or '@'.
  */
 const keyOf = (L: Loaded, i: number) => `${L.id}:${L.shard.n[i]}${L.dup[i] ? '@' + L.shard.mods[L.shard.m[i]] : ''}`;
+/** A key without its `source:` prefix (?c=Get-Mailbox, typed by hand) has source ''. */
 function parseKey(key: string) {
-  const [source, rest = ''] = key.split(':');
-  const [name, module = ''] = rest.split('@');
-  return { source, name, module };
+  const colon = key.indexOf(':');
+  const [name, module = ''] = key.slice(colon + 1).split('@');
+  return { source: colon < 0 ? '' : key.slice(0, colon), name, module };
 }
 
 /**
@@ -83,10 +84,8 @@ function literalScore(tt: string, L: Loaded, i: number): number {
   if (noun && noun.startsWith(tt)) return 700 - Math.min(100, noun.length - tt.length);
   const at = name.indexOf(tt);
   if (at >= 0) return 520 - Math.min(120, at);
-  if (tt.includes('-') || tt.length >= 4) {
-    const fa = flatMatch(name, L.lflat[i], tt);
-    if (fa >= 0) return 480 - Math.min(120, fa);
-  }
+  const fa = flatMatch(name, L.lflat[i], tt);
+  if (fa >= 0) return 480 - Math.min(120, fa);
   if (L.ldesc?.[i].includes(tt)) return 60;
   return 0;
 }
@@ -135,20 +134,30 @@ function typoScore(tt: string, L: Loaded, i: number): number {
   const max = typoBudget(tt.length);
   if (!max) return 0;
   const name = L.lname[i];
-  let best = prefixDistance(tt, L.lflat[i], max);
+  // Hyphens are compared against the hyphen-free name without them, so a misplaced one costs nothing.
+  let best = prefixDistance(tt.replace(/-/g, ''), L.lflat[i], max);
   for (let k = -1; k < L.words[i].length && best > 0; k++) best = Math.min(best, prefixDistance(tt, k < 0 ? name : name.slice(L.words[i][k]), max));
   return best > max ? 0 : 300 - 100 * best - Math.min(60, L.lname[i].length - tt.length);
 }
 
-function passes(L: Loaded, i: number, f: Filters): boolean {
+/**
+ * The filters as a test of one source's rows. Facet values match case-insensitively, as people
+ * type them in links (?verb=get is Get); each is resolved to the shard's value ids once per search.
+ */
+function filterOf(L: Loaded, f: Filters): (i: number) => boolean {
   const s = L.shard;
-  return (
-    (!f.verb || s.verbs[s.v[i]] === f.verb) &&
-    (!f.module || s.mods[s.m[i]] === f.module) &&
-    (!f.category || s.cats[s.c[i]] === f.category) &&
-    (!f.extra || s.extras[s.x[i]] === f.extra) &&
-    (!f.examples || !!s.e[i])
-  );
+  const ids = (values: string[], want: string) => {
+    if (!want) return null;
+    const w = want.toLowerCase();
+    return new Set(values.flatMap((v, k) => (v.toLowerCase() === w ? [k] : [])));
+  };
+  const verb = ids(s.verbs, f.verb), mod = ids(s.mods, f.module), cat = ids(s.cats, f.category), extra = ids(s.extras, f.extra);
+  return (i) =>
+    (!verb || verb.has(s.v[i])) &&
+    (!mod || mod.has(s.m[i])) &&
+    (!cat || cat.has(s.c[i])) &&
+    (!extra || extra.has(s.x[i])) &&
+    (!f.examples || !!s.e[i]);
 }
 
 export interface Hit { ref: number; score: number; len: number }
@@ -157,14 +166,14 @@ export interface Hit { ref: number; score: number; len: number }
 export function searchHits(all: Loaded[], q: string, filters: Filters): Hit[] {
   const tokens = queryTokens(q);
   const { sources } = scopeOf(filters.source);
-  const scope = all.filter((L) => sources.some((s) => s.id === L.id));
+  const scope = all.filter((L) => sources.some((s) => s.id === L.id)).map((L) => ({ L, passes: filterOf(L, filters) }));
   // A token with any literal hit in scope (under the filters) matches literally; one with none is
   // read as a typo. Typo matches never mix with real ones, so an exact name isn't buried in near misses.
-  const typo = tokens.map((t) => !scope.some((L) => L.shard.n.some((_, i) => passes(L, i, filters) && literalScore(t, L, i) > 0)));
+  const typo = tokens.map((t) => !scope.some(({ L, passes }) => L.shard.n.some((_, i) => passes(i) && literalScore(t, L, i) > 0)));
   const hits: Hit[] = [];
-  for (const L of scope) {
+  for (const { L, passes } of scope) {
     for (let i = 0; i < L.shard.n.length; i++) {
-      if (!passes(L, i, filters)) continue;
+      if (!passes(i)) continue;
       let score = tokens.length ? 0 : 1; // no query: everything matches, in index order
       for (let k = 0; k < tokens.length; k++) {
         const s = typo[k] ? typoScore(tokens[k], L, i) : literalScore(tokens[k], L, i);
@@ -178,9 +187,11 @@ export function searchHits(all: Loaded[], q: string, filters: Filters): Hit[] {
   return hits;
 }
 
-/** A scope's descriptions: still loading if any source's are, else failed if any source's did. */
-export const descriptionsOf = (scope: Loaded[]): Descriptions =>
-  scope.some((L) => L.descriptions === 'loading') ? 'loading' : scope.some((L) => L.descriptions === 'failed') ? 'failed' : 'ready';
+/** A scope's descriptions: whether any source's are still loading, and which sources' failed. */
+export const descriptionsOf = (scope: Loaded[]): Descriptions => ({
+  loading: scope.some((L) => L.descriptions === 'loading'),
+  failed: scope.filter((L) => L.descriptions === 'failed').map((L) => L.id),
+});
 
 export function facetsFor(scope: Loaded[], perSource: boolean): Facets {
   const uniq = (pick: (s: IndexShard) => string[]) =>
@@ -215,20 +226,21 @@ export function rowOf(all: Loaded[], ref: number): Row {
 
 /**
  * Resolve a link key: the row with that name and module, else the first row with that name
- * (an old unqualified link, or a module that no longer applies). Names match case-insensitively.
+ * (an old unqualified link, or a module that no longer applies). A key without a source looks in
+ * every source, in source order. Names match case-insensitively.
  */
 export function refOfKey(all: Loaded[], key: string): number | null {
   // Links are matched case-insensitively throughout: people retype and re-case them.
   const { source, name, module } = parseKey(key.toLowerCase());
-  const L = all.find((x) => x.id === source);
-  if (!L) return null;
-  let first = -1;
-  for (let i = 0; i < L.lname.length; i++) {
-    if (L.lname[i] !== name) continue;
-    if (!module || L.shard.mods[L.shard.m[i]].toLowerCase() === module) return encodeRef(L, i);
-    if (first < 0) first = i;
+  let first: number | null = null;
+  for (const L of source ? all.filter((x) => x.id === source) : all) {
+    for (let i = 0; i < L.lname.length; i++) {
+      if (L.lname[i] !== name) continue;
+      if (!module || L.shard.mods[L.shard.m[i]].toLowerCase() === module) return encodeRef(L, i);
+      first ??= encodeRef(L, i);
+    }
   }
-  return first < 0 ? null : encodeRef(L, first);
+  return first;
 }
 
 export function related(all: Loaded[], key: string): Row[] {

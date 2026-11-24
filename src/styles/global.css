@@ -27,7 +27,7 @@
   --tok-type: #9aa6c4;
   --tok-var: #f4c56b;
   --tok-str: #9ddc8a;
-  --tok-com: #6f7a93;
+  --tok-com: #78829b; /* 5.0:1 on --code-bg */
   --tok-num: #ff9e8a;
   --tok-op: #8d97ad;
 
@@ -59,7 +59,7 @@
     --tok-type: #5a6480;
     --tok-var: #9a5a00;
     --tok-str: #2d7a1f;
-    --tok-com: #6f7891;
+    --tok-com: #636c85; /* 4.9:1 on --code-bg */
     --tok-num: #b8402c;
     --tok-op: #5a6480;
     --danger: #b3261e;
@@ -85,7 +85,7 @@
   --tok-type: #5a6480;
   --tok-var: #9a5a00;
   --tok-str: #2d7a1f;
-  --tok-com: #6f7891;
+  --tok-com: #636c85;
   --tok-num: #b8402c;
   --tok-op: #5a6480;
   --danger: #b3261e;
@@ -479,10 +479,18 @@ kbd {
   tab-size: 4;
 }
 .code-syntax pre { padding-left: 32px; text-indent: -16px; }
-.code-syntax .sg { white-space: nowrap; }
+/*
+ * A group is an inline block: a line breaks between groups, so one that fits moves to the next
+ * line whole. Capped at the box's width, a wider group wraps between its words instead: this
+ * follows the box's own width at every pane size, never the viewport's.
+ */
+.code-syntax .sg { display: inline-block; max-width: 100%; text-indent: 0; }
+/* Holds "-" to its parameter's first word (Detail.tsx paramName). */
+.nb { white-space: nowrap; }
 .code .copy { position: absolute; top: 8px; right: 8px; background: var(--surface-solid); border-color: var(--line); }
 .copy-sm { width: 30px; height: 30px; border-radius: 8px; }
 .copy.is-done { color: color-mix(in oklab, var(--src) 75%, var(--ink-mix)); }
+.copy.is-failed, .btn.is-failed { color: var(--danger); }
 
 .t-cmd { color: var(--tok-cmd); }
 .t-param { color: var(--tok-param); }
@@ -497,7 +505,7 @@ kbd {
 .params th { text-align: left; font-weight: 500; color: var(--faint); font-size: 12px; padding: 0 12px 8px 0; border-bottom: 1px solid var(--line); }
 .params td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .params td:last-child { text-align: right; padding-right: 0; white-space: nowrap; }
-.params td code { font-size: 13px; overflow-wrap: break-word; /* types carry <wbr> at "." and camel case */ }
+.params td code { font-size: 13px; overflow-wrap: break-word; /* names and types carry <wbr> at "." and camel case */ }
 .param-desc { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 60ch; }
 
 .block-head { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
@@ -519,11 +527,11 @@ kbd {
 .related button:hover { color: var(--text); border-color: color-mix(in oklab, var(--src) 45%, transparent); }
 
 .detail-skel { display: grid; gap: 10px; margin-top: 24px; }
-.detail-skel span { display: block; height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
-.detail-skel span:nth-child(1) { width: 70%; }
-.detail-skel span:nth-child(2) { height: 90px; }
-.detail-skel span:nth-child(3) { width: 40%; }
-.detail-skel span:nth-child(4) { height: 140px; }
+.detail-skel i { display: block; height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+.detail-skel i:nth-of-type(1) { width: 70%; }
+.detail-skel i:nth-of-type(2) { height: 90px; }
+.detail-skel i:nth-of-type(3) { width: 40%; }
+.detail-skel i:nth-of-type(4) { height: 140px; }
 .notice { margin: 20px 0 0; padding: 12px 14px; border-radius: 10px; font-size: 14px; display: grid; gap: 10px; justify-items: start; }
 .notice p { margin: 0; }
 .notice-link { margin: 0 12px 10px; overflow-wrap: anywhere; }
@@ -619,8 +627,9 @@ kbd {
   .sources {
     /* Vertical padding leaves room for a tab's focus ring, which the scrolling strip would clip. */
     flex-wrap: nowrap; overflow-x: auto; margin: -4px -16px 0; padding: 4px 16px 6px; scrollbar-width: none;
-    mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent);
   }
+  /* The fade says more tabs lie to the right, so it shows only while some do (chrome.tsx Band). */
+  .sources[data-more] { mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent); }
   .sources::-webkit-scrollbar { display: none; }
   .source { flex: none; }
   .searchbox input { height: 52px; font-size: 16px; }
@@ -642,8 +651,17 @@ kbd {
   .detail-title code { font-size: 21px; }
   .intro { display: none; }
   .params td:last-child { white-space: normal; }
-  /* Too narrow to keep each parameter whole on a line: a long group wraps like prose. */
-  .code-syntax .sg { white-space: normal; }
+}
+
+/*
+ * Short viewports (a landscape phone, a desktop at high zoom): a fixed band would leave the panes a
+ * row or two. The page scrolls as a whole instead, so the band scrolls away and the panes fill the
+ * viewport; a list scrolled to its end hands the scroll on to the page.
+ */
+@media (max-height: 540px) {
+  .app { height: auto; }
+  .work { height: 100dvh; }
+  .results { overscroll-behavior: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

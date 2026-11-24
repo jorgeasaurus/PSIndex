@@ -6,8 +6,8 @@ import { useTheme } from './theme';
 import { ResultList, ResultsSkeleton, type ListNav } from './ResultList';
 import { Detail } from './Detail';
 import { Band, DescriptionsFailed, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
-import { ALL, formatCount, queryTokens, scopeOf } from './sources';
-import { EMPTY_FILTERS, activeFilters, readUrl, writeUrl } from './url';
+import { ALL, formatCount, scopeOf, searchText } from './sources';
+import { EMPTY_FILTERS, activeFilters, canonicalFilters, readUrl, sameFilters, urlOf, writeUrl, type UrlState } from './url';
 import type { Facets, Filters, Results, Row } from './types';
 
 /**
@@ -29,13 +29,16 @@ function Shell() {
       inert
       canvasRef={createRef()}
       detailRef={createRef()}
-      band={<Band q="" source={ALL.id} placeholder="Loading the index…" inputRef={createRef()} handlers={INERT_BAND} live={false} activeId="" />}
+      band={<Band q="" source={ALL.id} placeholder="Loading the index…" inputRef={createRef()} handlers={INERT_BAND} live={false} expanded={false} activeId="" />}
       toolbar={<Toolbar label="Loading index…" filterCount={0} showFilters={false} />}
       results={<ResultsSkeleton />}
       detail={<Intro />}
     />
   );
 }
+
+/** history.state key marking the narrow-screen dialog's own history entry. */
+const DIALOG_ENTRY = 'psindexDialog';
 
 const NO_FACETS: Facets = { verbs: [], modules: [], categories: [], extras: [] };
 
@@ -65,14 +68,16 @@ function useNarrow() {
  * Every change is one setSel, so a new choice always replaces a pending one.
  */
 type Selection = { row: Row } | { link: string } | { enter: number; shown: Row | null } | { missing: string } | null;
-/** A pending Enter given up: the pane goes back to what it showed. */
-const settle = (s: Selection): Selection => (s && 'enter' in s ? s.shown && { row: s.shown } : s);
+/** A new search: a pending Enter is given up (the pane goes back to what it showed), and a broken-link notice is dismissed. */
+const settle = (s: Selection): Selection => (s && 'enter' in s ? s.shown && { row: s.shown } : s && 'missing' in s ? null : s);
 
 function Search() {
   const [initial] = useState(readUrl);
   const [q, setQ] = useState(initial.q);
   const [filters, setFilters] = useState(initial.filters);
   const [sel, setSel] = useState<Selection>(initial.open ? { link: initial.open } : null);
+  // Counts opens, so re-opening the entry on screen starts it afresh (a failed load is retried).
+  const [opens, setOpens] = useState(0);
   const [results, setResults] = useState<Results | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -95,14 +100,17 @@ function Search() {
   // (Enter) already sees it as the latest, not a passive effect still waiting for the next frame.
   // A newer search also gives up an Enter pressed for the previous one.
   useLayoutEffect(() => { client.search(q, filters); setSel(settle); }, [q, filters]);
+  // A facet value from a link in another case (?verb=get) takes the facet's spelling.
+  useEffect(() => { if (results) setFilters((f) => canonicalFilters(f, results.facets)); }, [results?.facets]);
   const open = !sel ? null : 'row' in sel ? sel.row : 'enter' in sel ? sel.shown : null;
   const link = sel && 'link' in sel ? sel.link : '';
   const enterFor = sel && 'enter' in sel ? sel.enter : null;
   const missing = sel && 'missing' in sel ? sel.missing : '';
   // Until the deep link resolves, keep it in the URL so a reload still opens it.
   const openKey = open?.key ?? link;
+  const entryKey = open ? `${open.key}#${opens}` : '';
   // Each entry opens at its top (the pane, not the article, is what scrolls).
-  useLayoutEffect(() => { if (detailRef.current) detailRef.current.scrollTop = 0; }, [open?.key]);
+  useLayoutEffect(() => { if (detailRef.current) detailRef.current.scrollTop = 0; }, [entryKey]);
   useEffect(() => writeUrl({ q, filters, open: openKey }), [q, filters, openKey]);
 
   // Resolve the deep link. An old or unqualified key adopts the row's canonical key.
@@ -114,10 +122,11 @@ function Search() {
   }, [link]);
 
   // Global keys, from anywhere on the page:
-  //   "/" or Ctrl/Cmd+K focuses search;
+  //   "/" or Ctrl/Cmd+K focuses search (closing the narrow-screen dialog, which hides the box);
   //   Escape closes the open entry (back to the search box), or else clears the query.
   // Escape's default is prevented: the search input would also clear itself natively.
   const escape = useRef(() => {});
+  const toSearch = useRef(() => {});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // The MCP dialog closes itself on Escape, and its focus trap owns Tab. preventDefault here
@@ -126,8 +135,7 @@ function Search() {
       const typing = (e.target as HTMLElement)?.closest('input:not([type=checkbox]), textarea, select');
       if ((e.key === '/' && !typing) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
+        toSearch.current();
       } else if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest('select')) {
         e.preventDefault();
         escape.current();
@@ -143,6 +151,7 @@ function Search() {
 
   const openRow = useCallback((row: Row) => {
     setSel({ row });
+    setOpens((n) => n + 1);
     // Opening an entry sends a pulse from the detail pane, so the field marks every step of a lookup.
     const pane = detailRef.current?.getBoundingClientRect();
     if (pane?.width) pulse({ x: pane.left + 40, y: pane.top + 40 }, 0.7);
@@ -152,68 +161,98 @@ function Search() {
    * Back from the entry (Back button, Escape): focus returns to the search box once the entry is
    * closed, i.e. after the render that lifts the narrow-screen dialog's inert from the band.
    */
-  const refocus = useRef(false);
-  const closeToSearch = () => { refocus.current = true; close(); };
+  const refocus = useRef<'' | 'focus' | 'select'>('');
+  const closeToSearch = (how: 'focus' | 'select' = 'focus') => { refocus.current = how; close(); };
   useEffect(() => {
     if (open || !refocus.current) return;
-    refocus.current = false;
+    const how = refocus.current;
+    refocus.current = '';
     inputRef.current?.focus({ preventScroll: true });
+    if (how === 'select') inputRef.current?.select();
   }, [open]);
 
   /**
-   * The narrow-screen dialog is a history entry of its own, so the phone's Back gesture closes it
-   * instead of leaving the page. In-app Back drops that same entry once: a repeated Escape or a
-   * double click must not pop the page behind it. Leaving the narrow layout drops the entry too,
-   * without closing the cmdlet.
+   * The narrow-screen dialog is a history entry of its own (marked in its state), so the phone's
+   * Back gesture closes it instead of leaving the page. In-app Back drops that same entry once: a
+   * repeated Escape or a double click must not pop the page behind it. Leaving the narrow layout
+   * drops the entry too, without closing the cmdlet. Every other move through history (Back,
+   * Forward) shows what the reached entry's URL names, so the screen always matches the URL.
    */
   const dialog = !!open && narrow;
-  const pushed = useRef(false);
+  const onDialogEntry = () => !!history.state?.[DIALOG_ENTRY];
+  /**
+   * Push the dialog's entry. The entry under it is rewritten to name no open cmdlet first, so Back
+   * from a deep link (?c=…) or from a window narrowed with an entry open lands on the list.
+   */
+  const pushDialogEntry = () => {
+    const here = location.pathname + location.search;
+    history.replaceState(history.state, '', urlOf({ ...urlNow.current, open: '' }));
+    history.pushState({ ...history.state, [DIALOG_ENTRY]: true }, '', here);
+  };
   /** A history.back() we started. Its popstate restores the URL and must not close the entry. */
   const dropping = useRef(false);
   const dialogNow = useRef(false);
   dialogNow.current = dialog;
-  const urlNow = useRef({ q, filters, open: openKey });
+  const urlNow = useRef<UrlState>({ q, filters, open: openKey });
   urlNow.current = { q, filters, open: openKey };
   const dropEntry = () => {
-    if (!pushed.current || dropping.current) return;
+    if (!onDialogEntry() || dropping.current) return;
     dropping.current = true;
     history.back();
   };
   // A layout effect: the entry exists as soon as the dialog is on screen, so Back can never skip it.
   // When the dialog goes away without a browser Back (widen, Home, Dismiss), drop the leftover entry.
+  // A reload or Forward onto the dialog's entry reopens the dialog on that entry: nothing to push.
+  const wasDialog = useRef(false);
   useLayoutEffect(() => {
     if (dialog) {
-      if (pushed.current || dropping.current) return;
-      history.pushState(history.state, '', location.href);
-      pushed.current = true;
-      return;
+      wasDialog.current = true;
+      if (!onDialogEntry() && !dropping.current) pushDialogEntry();
+    } else if (wasDialog.current) {
+      wasDialog.current = false;
+      dropEntry();
     }
-    dropEntry();
   }, [dialog]);
+  /** Show what a URL reached through history names. Unchanged parts stay as they are (the list keeps its place). */
+  const showUrl = useRef((_: UrlState) => {});
+  showUrl.current = (u) => {
+    setQ(u.q);
+    setFilters((f) => (sameFilters(f, u.filters) ? f : u.filters));
+    if (u.open === openKey) return;
+    if (u.open) setSel({ link: u.open });
+    else closeToSearch();
+  };
   useEffect(() => {
     const onPop = () => {
-      const ours = dropping.current;
-      dropping.current = false;
-      if (!pushed.current) return;
-      pushed.current = false;
-      if (!ours) {
-        closeToSearch();
+      if (dropping.current) {
+        dropping.current = false;
+        // history.back() restored the URL from before the dialog. Put the current one back.
+        writeUrl(urlNow.current);
+        if (dialogNow.current) pushDialogEntry();
         return;
       }
-      // history.back() restored the URL from before the dialog. Put the current one back.
-      writeUrl(urlNow.current);
-      if (dialogNow.current) {
-        history.pushState(history.state, '', location.pathname + location.search);
-        pushed.current = true;
-      }
+      showUrl.current(readUrl());
     };
     addEventListener('popstate', onPop);
     return () => removeEventListener('popstate', onPop);
   }, []);
   const back = () => { dropEntry(); closeToSearch(); };
 
-  // Escape gives up a pending Enter first (what was typed stays), then closes the entry, then clears.
-  escape.current = () => { if (enterFor !== null) setSel(settle); else if (openKey) back(); else if (q) setQ(''); };
+  // After a failed index load nothing can be searched, so no key changes the search either.
+  // Otherwise Escape gives up a pending Enter first (what was typed stays), then closes the entry,
+  // then dismisses the broken-link notice, then clears.
+  escape.current = () => {
+    if (loadError) return;
+    if (enterFor !== null) setSel(settle);
+    else if (openKey) back();
+    else if (missing) setSel(null);
+    else if (q) setQ('');
+  };
+  toSearch.current = () => {
+    if (dialog) { dropEntry(); closeToSearch('select'); return; }
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  };
 
   // Resolve a pending Enter once its search's results are the ones on screen.
   useEffect(() => {
@@ -230,8 +269,13 @@ function Search() {
     if (e.key === '/') { e.preventDefault(); return; }
     const nav = listRef.current;
     if (!nav) return;
+    // Plain Home/End stay with the text box (caret); with Ctrl/Cmd they jump to the first/last row.
+    const jump = (e.ctrlKey || e.metaKey) && (e.key === 'Home' || e.key === 'End');
     if (e.key === 'ArrowDown') { e.preventDefault(); nav.move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); nav.move(-1); }
+    else if (e.key === 'PageDown') { e.preventDefault(); nav.page(1); }
+    else if (e.key === 'PageUp') { e.preventDefault(); nav.page(-1); }
+    else if (jump) { e.preventDefault(); nav.move(e.key === 'End' ? Infinity : -Infinity); }
     else if (e.key === 'Enter') {
       e.preventDefault();
       // Enter means the cursor's row in the results of what is typed: if they are still coming, open on
@@ -241,13 +285,15 @@ function Search() {
   };
 
   const filterCount = activeFilters(filters);
+  const clearFilters = () => setFilters({ ...EMPTY_FILTERS, source: filters.source });
+  const searchFor = (text: string) => { setQ(text); inputRef.current?.focus(); };
   const countLabel = loadError
     ? 'Index unavailable'
     : !results
       ? 'Loading index…'
       : `${formatCount(results.refs.length)} ${results.refs.length === 1 ? 'result' : 'results'}`;
   // Search time, for a real query only (a blank query lists everything).
-  const timing = results && !loadError && queryTokens(results.q).length ? `${results.ms < 1 ? '<1' : Math.round(results.ms)} ms` : undefined;
+  const timing = results && !loadError && searchText(results.q) ? `${results.ms < 1 ? '<1' : Math.round(results.ms)} ms` : undefined;
 
   return (
     <Frame
@@ -261,13 +307,15 @@ function Search() {
         <Band
           q={q}
           source={filters.source}
-          placeholder={scope.placeholder}
+          placeholder={loadError ? 'Index unavailable' : scope.placeholder}
           inputRef={inputRef}
           activeId={activeId}
           inert={dialog}
           live={!loadError}
+          expanded={!loadError && !!results?.refs.length}
           dark={theme === 'dark'}
-          handlers={{
+          // After a failed load only the theme toggle still acts; the URL (a deep link) waits for Reload.
+          handlers={loadError ? { ...INERT_BAND, onToggleTheme: toggleTheme } : {
             onQuery: (value, caret) => { setQ(value); pulse(caret); },
             onKeyDown,
             onClear: () => { setQ(''); inputRef.current?.focus(); },
@@ -287,9 +335,9 @@ function Search() {
               <button type="button" class="chip" onClick={() => { close(); inputRef.current?.focus(); }}>Dismiss</button>
             </div>
           )}
-          {results?.descriptions === 'failed' && <DescriptionsFailed />}
+          {!!results?.descriptions.failed.length && <DescriptionsFailed sources={results.descriptions.failed} />}
           {showFilters && !loadError && (
-            <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={() => setFilters({ ...EMPTY_FILTERS, source: filters.source })} />
+            <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={clearFilters} />
           )}
         </>
       }
@@ -303,14 +351,24 @@ function Search() {
             onOpen={openRow}
             onCursor={setActiveId}
             query={q}
-            empty={<EmptyState q={q.trim()} descriptions={results?.descriptions ?? 'loading'} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => { setFilters(EMPTY_FILTERS); inputRef.current?.focus(); }} />}
+            empty={
+              <EmptyState
+                q={searchText(q)}
+                descriptionsLoading={results?.descriptions.loading ?? true}
+                inLabel={scope.inLabel}
+                onSearch={searchFor}
+                // Clearing the filters keeps the source the user picked; leaving it is a separate choice.
+                onClearFilters={filterCount ? () => { clearFilters(); inputRef.current?.focus(); } : undefined}
+                onSearchAll={filters.source !== ALL.id ? () => { setFilters(EMPTY_FILTERS); inputRef.current?.focus(); } : undefined}
+              />
+            }
           />
         )
       }
       detail={
         open
-          // Keyed by entry: each one starts fresh (no related list or body from the previous entry).
-          ? <Detail key={open.key} row={open} client={client} onOpen={openRow} onClose={back} takeFocus={narrow} />
+          // Keyed by open: each one starts fresh (no related list or body from the previous entry).
+          ? <Detail key={entryKey} row={open} client={client} onOpen={openRow} onClose={back} takeFocus={narrow} />
           // A sample is a fresh search in its source: no filters carried over that could hide it.
           : <Intro onPick={loadError ? undefined : (s, sample) => { setFilters({ ...EMPTY_FILTERS, source: s }); setQ(sample); inputRef.current?.focus(); }} />
       }

@@ -82,8 +82,8 @@ export interface Facets {
   extras: string[];
 }
 
-/** The state of a scope's description files. 'failed': only names were searched. */
-export type Descriptions = 'loading' | 'ready' | 'failed';
+/** A scope's description files: whether any are still loading, and the sources whose files failed (only their names were searched). */
+export interface Descriptions { loading: boolean; failed: SourceId[] }
 
 /** One search's answer; `id` is the search's, so a re-run of the same search keeps it. */
 export interface Results {

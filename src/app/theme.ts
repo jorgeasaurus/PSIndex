@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 
 export type Theme = 'light' | 'dark';
 
-/** localStorage key; also read by the inline pre-paint script in src/pages/index.astro. */
+/** localStorage key; also read by the pre-paint script in src/components/ThemeScript.astro. */
 export const THEME_KEY = 'psindex-theme';
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
