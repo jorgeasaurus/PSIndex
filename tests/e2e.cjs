@@ -925,7 +925,11 @@ const scenarios = [
       await p.waitForSelector('.app[data-open] .detail-title');
       check(param(p, 'c') === c, 'Forward after closing reopens the entry the URL names', p.url());
       await p.goBack();
-      await p.waitForFunction(() => !document.querySelector('.app[data-open]') && !new URLSearchParams(location.search).get('c'));
+      // On a timeout, say which history state the app was left in (seen once in CI, not locally).
+      await p.waitForFunction(() => !document.querySelector('.app[data-open]') && !new URLSearchParams(location.search).get('c')).catch(async (e) => {
+        const at = await p.evaluate(() => ({ search: location.search, open: !!document.querySelector('.app[data-open]'), state: history.state, length: history.length }));
+        throw new Error(`${e.message.split('\n')[0]} after Back from a reopened entry: ${JSON.stringify(at)}`);
+      });
       // "/" over the dialog closes it and puts the cursor in the search box.
       await p.click('.result');
       await p.waitForFunction(() => document.activeElement?.id === 'detail-title');
