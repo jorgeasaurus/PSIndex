@@ -401,6 +401,69 @@ const scenarios = [
     },
   },
   {
+    name: 'dialog history stays on the page',
+    context: { viewport: { width: 390, height: 844 } },
+    async run(p) {
+      // history.length does not shrink on back, so each entry carries a marker. Seed sits behind
+      // the page: one Back from the page lands there, and a second Back from the dialog would too.
+      await p.goto(`${BASE}/?q=seed-marker`);
+      await rowsReady(p);
+      await p.evaluate(() => {
+        window.__pops = 0;
+        addEventListener('popstate', () => { window.__pops++; });
+        history.replaceState({ marker: 'seed' }, '', location.href);
+        history.pushState({ marker: 'page' }, '', location.pathname);
+      });
+      await search(p, 'get-mguser', 'Get-MgUser');
+      const before = await p.evaluate(() => history.length);
+      await p.keyboard.press('Enter');
+      await titleIs(p, 'Get-MgUser');
+      check(await p.evaluate((n) => history.length === n + 1, before), 'opening the dialog adds one history entry');
+
+      // Both Escapes run before popstate, the way a key repeat does. Target an element: the
+      // page handler calls closest() on the event target, which document itself does not have.
+      const pops = await p.evaluate(() => window.__pops);
+      await p.evaluate(() => {
+        const esc = () => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        esc();
+        esc();
+      });
+      await p.waitForFunction((n) => window.__pops > n && !document.querySelector('.detail-title'), pops);
+      await p.waitForTimeout(250); // a second history.back() would land after the first popstate
+      const escaped = await p.evaluate(() => ({
+        pops: window.__pops,
+        marker: history.state?.marker,
+        q: document.querySelector('input[type=search]').value,
+      }));
+      check(
+        escaped.pops === pops + 1 && escaped.marker === 'page' && escaped.q === 'get-mguser',
+        'a repeated Escape closes the dialog once and stays on the page',
+        JSON.stringify(escaped),
+      );
+
+      await p.keyboard.press('Enter');
+      await titleIs(p, 'Get-MgUser');
+      const opened = await p.evaluate(() => window.__pops);
+      await p.setViewportSize({ width: 1200, height: 800 });
+      await p.waitForFunction(
+        (n) => window.__pops > n
+          && document.querySelector('.detail-title code')?.textContent === 'Get-MgUser'
+          && document.querySelector('.pane-detail')?.getAttribute('role') !== 'dialog',
+        opened,
+      );
+      await p.waitForTimeout(250);
+      const widened = await p.evaluate(() => ({ pops: window.__pops, c: new URLSearchParams(location.search).get('c') }));
+      check(
+        widened.pops === opened + 1 && widened.c === 'graph:Get-MgUser',
+        'widening drops the dialog history entry and keeps the open link',
+        JSON.stringify(widened),
+      );
+      await p.goBack();
+      await p.waitForFunction(() => history.state?.marker === 'seed');
+      check(new URL(p.url()).searchParams.get('q') === 'seed-marker', 'Back after widening returns to the previous page', p.url());
+    },
+  },
+  {
     name: 'Escape cancels a pending Enter',
     async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
     async run(p) {

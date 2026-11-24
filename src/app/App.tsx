@@ -159,22 +159,55 @@ function Search() {
 
   /**
    * The narrow-screen dialog is a history entry of its own, so the phone's Back gesture closes it
-   * instead of leaving the page. Back from inside the app goes through history too, to drop that entry.
+   * instead of leaving the page. In-app Back drops that same entry once: a repeated Escape or a
+   * double click must not pop the page behind it. Leaving the narrow layout drops the entry too,
+   * without closing the cmdlet.
    */
   const dialog = !!open && narrow;
   const pushed = useRef(false);
+  /** A history.back() we started. Its popstate restores the URL and must not close the entry. */
+  const dropping = useRef(false);
+  const dialogNow = useRef(false);
+  dialogNow.current = dialog;
+  const urlNow = useRef({ q, filters, open: openKey });
+  urlNow.current = { q, filters, open: openKey };
+  const dropEntry = () => {
+    if (!pushed.current || dropping.current) return;
+    dropping.current = true;
+    history.back();
+  };
   // A layout effect: the entry exists as soon as the dialog is on screen, so Back can never skip it.
+  // When the dialog goes away without a browser Back (widen, Home, Dismiss), drop the leftover entry.
   useLayoutEffect(() => {
-    if (!dialog || pushed.current) return;
-    history.pushState(history.state, '', location.href);
-    pushed.current = true;
+    if (dialog) {
+      if (pushed.current || dropping.current) return;
+      history.pushState(history.state, '', location.href);
+      pushed.current = true;
+      return;
+    }
+    dropEntry();
   }, [dialog]);
   useEffect(() => {
-    const onPop = () => { if (pushed.current) { pushed.current = false; closeToSearch(); } };
+    const onPop = () => {
+      const ours = dropping.current;
+      dropping.current = false;
+      if (!pushed.current) return;
+      pushed.current = false;
+      if (!ours) {
+        closeToSearch();
+        return;
+      }
+      // history.back() restored the URL from before the dialog. Put the current one back.
+      writeUrl(urlNow.current);
+      if (dialogNow.current) {
+        history.pushState(history.state, '', location.pathname + location.search);
+        pushed.current = true;
+      }
+    };
     addEventListener('popstate', onPop);
     return () => removeEventListener('popstate', onPop);
   }, []);
-  const back = () => (pushed.current ? history.back() : closeToSearch());
+  const back = () => { dropEntry(); closeToSearch(); };
 
   // Escape gives up a pending Enter first (what was typed stays), then closes the entry, then clears.
   escape.current = () => { if (enterFor !== null) setSel(settle); else if (openKey) back(); else if (q) setQ(''); };
