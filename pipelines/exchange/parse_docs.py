@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import gallery_latest_version, output_dir, require_cmdlets, source_version, syntax_from
+from common import gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -57,19 +57,6 @@ MODULE_PACKAGE_MAP = {
     'WhiteboardAdmin': 'WhiteboardAdmin',
     'Microsoft.SharePoint.MigrationTool.PowerShell': 'Microsoft.SharePoint.MigrationTool',
 }
-
-def fetch_module_versions():
-    """Fetch latest stable versions for all known modules from PowerShell Gallery."""
-    versions = {}
-    for module_name, package_name in MODULE_PACKAGE_MAP.items():
-        ver = gallery_latest_version(package_name)
-        if ver:
-            versions[module_name] = ver
-            print(f"  {module_name}: v{ver} (from {package_name})")
-        else:
-            print(f"  {module_name}: version not found")
-    return versions
-
 
 def get_exchange_category(cmdlet_name):
     """Map an Exchange cmdlet to a sub-category by its noun."""
@@ -171,8 +158,7 @@ def main():
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Fetching module versions from PowerShell Gallery...")
-    module_versions = fetch_module_versions()
+    module_versions = gallery_module_versions(MODULE_PACKAGE_MAP, 'exchange')
     primary_version = source_version(module_versions.get('ExchangePowerShell'), 'exchange')
 
     manifest_entries = []

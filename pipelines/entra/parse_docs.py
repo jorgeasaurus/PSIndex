@@ -18,10 +18,9 @@ import os
 import re
 import sys
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from common import gallery_latest_version, output_dir, require_cmdlets, source_version, syntax_from
+from common import gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -209,16 +208,6 @@ def parse_cmdlet_file(filepath, module_name, api_version):
     }
 
 
-def fetch_all_module_versions(module_names: list) -> dict:
-    """Latest PowerShell Gallery version of each module (None where the lookup failed)."""
-    print(f"Fetching module versions from PowerShell Gallery ({len(module_names)} modules)...")
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        versions = dict(zip(module_names, executor.map(gallery_latest_version, module_names)))
-    found = sum(1 for v in versions.values() if v)
-    print(f"  Resolved {found}/{len(module_names)} module versions")
-    return versions
-
-
 def scan_version_dir(version_dir: Path, api_version: str) -> list:
     """Scan all module directories under a version directory."""
     results = []
@@ -264,7 +253,7 @@ def main():
 
     # Fetch module versions from PowerShell Gallery
     unique_modules = sorted(set(c["module"] for c in all_cmdlets))
-    module_versions = fetch_all_module_versions(unique_modules)
+    module_versions = gallery_module_versions({m: m for m in unique_modules}, "entra")
 
     # Build slim manifest (short keys, no descriptions or moduleVersion)
     DEFAULT_DESC = "Microsoft Entra PowerShell cmdlet."

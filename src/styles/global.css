@@ -110,7 +110,7 @@ body {
 }
 code, kbd, pre { font-family: var(--font-code); font-variant-ligatures: none; }
 ::selection { background: color-mix(in oklab, var(--src, var(--src-all)) 35%, transparent); color: var(--text); }
-:focus-visible { outline: 2px solid color-mix(in oklab, var(--src, var(--src-all)) 80%, var(--ink-mix)); outline-offset: 2px; border-radius: 6px; }
+:focus-visible { outline: 2px solid color-mix(in oklab, var(--src, var(--src-all)) 60%, var(--ink-mix)); outline-offset: 2px; border-radius: 6px; }
 button { font: inherit; color: inherit; cursor: pointer; }
 a { color: inherit; text-underline-offset: 3px; }
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
@@ -267,6 +267,8 @@ kbd {
   min-height: 0;
 }
 .pane {
+  /* The containing block for absolutely placed descendants (.sr-only), so they never extend the page. */
+  position: relative;
   min-height: 0;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -334,7 +336,7 @@ kbd {
 .check input { accent-color: var(--src); width: 16px; height: 16px; }
 .link-btn {
   border: 0; background: none; padding: 6px 2px;
-  color: color-mix(in oklab, var(--src) 70%, var(--ink-mix));
+  color: color-mix(in oklab, var(--src) 55%, var(--ink-mix));
   font-size: 13px; text-decoration: underline; text-underline-offset: 3px;
 }
 
@@ -355,7 +357,9 @@ kbd {
   gap: 2px;
 }
 /* Cursor and open row: a tint plus an edge bar, so neither relies on a faint background alone. */
-.result.is-active { --row-bg: var(--surface-3); box-shadow: inset 3px 0 0 var(--line-strong); }
+.result.is-active { --row-bg: var(--surface-3); box-shadow: inset 3px 0 0 color-mix(in oklab, var(--src) 60%, var(--ink-mix)); }
+/* The open row's tint lightens its background: its secondary text steps up to stay readable. */
+.result.is-open .result-meta, .result.is-open .result-module { color: var(--muted); }
 .result.is-open { --row-bg: color-mix(in oklab, var(--src) 16%, var(--surface-solid)); box-shadow: inset 3px 0 0 color-mix(in oklab, var(--src) 80%, var(--ink-mix)); }
 .result-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .result-name {
@@ -429,7 +433,7 @@ kbd {
   font-weight: 500;
 }
 .tag-warn { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, transparent); }
-.tag-req { color: color-mix(in oklab, var(--src) 70%, var(--ink-mix)); border-color: color-mix(in oklab, var(--src) 40%, transparent); }
+.tag-req { color: color-mix(in oklab, var(--src) 55%, var(--ink-mix)); border-color: color-mix(in oklab, var(--src) 40%, transparent); }
 .detail-links { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn {
   display: inline-flex; align-items: center; gap: 7px;
@@ -496,6 +500,8 @@ kbd {
 .params td code { font-size: 13px; overflow-wrap: break-word; /* types carry <wbr> at "." and camel case */ }
 .param-desc { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 60ch; }
 
+.block-head { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.block-head h3 { margin: 0; }
 .perms, .related { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .perms code {
   display: inline-block; padding: 4px 8px; border-radius: 6px;
@@ -503,7 +509,8 @@ kbd {
   font-size: 13px;
 }
 .related button {
-  height: 30px; padding: 0 10px; border-radius: 8px;
+  /* A long name wraps inside its button instead of widening the pane. */
+  max-width: 100%; min-height: 30px; padding: 4px 10px; border-radius: 8px; text-align: left; overflow-wrap: anywhere;
   border: 1px solid var(--line); background: transparent;
   font-size: 13px; color: var(--muted);
 }
@@ -554,7 +561,8 @@ kbd {
 @media (max-width: 900px) {
   .band { padding: 30px 16px 14px; gap: 14px; }
   .sources {
-    flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none;
+    /* Vertical padding leaves room for a tab's focus ring, which the scrolling strip would clip. */
+    flex-wrap: nowrap; overflow-x: auto; margin: -4px -16px 0; padding: 4px 16px 6px; scrollbar-width: none;
     mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent);
   }
   .sources::-webkit-scrollbar { display: none; }
@@ -578,7 +586,8 @@ kbd {
   .detail-title code { font-size: 21px; }
   .intro { display: none; }
   .params td:last-child { white-space: normal; }
-  .code-syntax pre { mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+  /* Too narrow to keep each parameter whole on a line: a long group wraps like prose. */
+  .code-syntax .sg { white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {

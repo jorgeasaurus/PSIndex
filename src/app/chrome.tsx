@@ -58,7 +58,7 @@ function caretPoint(el: HTMLInputElement) {
   return { x: Math.min(r.right - 24, x), y: r.top + r.height / 2 };
 }
 
-export function Band({ q, source, placeholder, inputRef, handlers, live, activeId, inert }: {
+export function Band({ q, source, placeholder, inputRef, handlers, live, activeId, inert, dark }: {
   q: string;
   source: SourceId;
   placeholder: string;
@@ -70,17 +70,24 @@ export function Band({ q, source, placeholder, inputRef, handlers, live, activeI
   activeId: string;
   /** Behind the narrow-screen detail dialog. */
   inert?: boolean;
+  /** The theme on screen is dark (unknown in the server render, which has no theme toggle state yet). */
+  dark?: boolean;
 }) {
   const { onQuery, onKeyDown, onClear, onHome, onToggleTheme, onPickSource } = handlers;
   return (
     <header class="band" inert={inert}>
       <div class="band-top">
-        <a class="wordmark" data-quiet href="/" aria-label="PSIndex home" onClick={(e) => { e.preventDefault(); onHome(); }}>
+        <a class="wordmark" data-quiet href="/" aria-label="PSIndex home" onClick={(e) => {
+          // A modified click (new tab, new window) is the browser's: only a plain click resets this page.
+          if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          onHome();
+        }}>
           <span class="wordmark-ps">PS</span>Index
         </a>
         <p class="tagline" data-quiet>PowerShell cmdlets for {SOURCE_NAMES}. One index.</p>
         <div class="band-actions" data-quiet>
-          <button class="icon-btn" type="button" onClick={onToggleTheme} aria-label="Toggle light or dark theme">
+          <button class="icon-btn" type="button" onClick={onToggleTheme} aria-label="Dark theme" aria-pressed={dark}>
             <Sun class="i-sun" size={18} /><Moon class="i-moon" size={18} />
           </button>
           <a class="icon-btn" href="https://github.com/jorgeasaurus/PSIndex" aria-label="Source on GitHub"><GithubMark /></a>
@@ -94,14 +101,15 @@ export function Band({ q, source, placeholder, inputRef, handlers, live, activeI
           type="search"
           value={q}
           readOnly={!live}
+          size={1 /* the box's width comes from the layout, not from a default character count */}
           spellcheck={false}
           autoComplete="off"
           role="combobox"
           list={undefined /* no datalist: the results list is the popup (aria-controls) */}
-          aria-expanded="true"
+          aria-expanded={live}
           aria-autocomplete="list"
           aria-label="Search cmdlets"
-          aria-controls="results"
+          aria-controls={live ? 'results' : undefined}
           aria-activedescendant={activeId || undefined}
           placeholder={placeholder}
           onInput={(e) => { const el = e.target as HTMLInputElement; onQuery(el.value, caretPoint(el)); }}
@@ -127,9 +135,11 @@ function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label:
   const ref = useRef<HTMLButtonElement>(null);
   // The tab strip scrolls sideways on narrow screens; keep the selected tab in view.
   // Centred, so it never sits under the strip's faded edges.
-  useEffect(() => { if (on) ref.current?.scrollIntoView({ block: 'nearest', inline: 'center' }); }, [on]);
+  const centre = () => ref.current?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  useEffect(() => { if (on) centre(); }, [on]);
   return (
-    <button ref={ref} type="button" class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
+    // A tab reached by keyboard is centred too: at the strip's edge it would sit under the fade.
+    <button ref={ref} type="button" onFocus={centre} class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
       <span class="source-dot" aria-hidden="true" />
       {label}
       <span class="source-n">{formatCount(count)}</span>
@@ -138,13 +148,16 @@ function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label:
 }
 
 /** `label` is announced as it changes (the result count); `timing` is shown but not announced. */
-export function Toolbar({ label, timing, filterCount, showFilters, onToggleFilters }: { label: string; timing?: string; filterCount: number; showFilters: boolean; onToggleFilters: () => void }) {
+/** No `onToggleFilters`: nothing can be filtered (the shell, a failed load), so there is no Filters control. */
+export function Toolbar({ label, timing, filterCount, showFilters, onToggleFilters }: { label: string; timing?: string; filterCount: number; showFilters: boolean; onToggleFilters?: () => void }) {
   return (
     <div class="toolbar">
       <span class="count"><span aria-live="polite">{label}</span>{timing && <span class="ms" aria-hidden="true"> · {timing}</span>}</span>
-      <button type="button" class={'chip' + (showFilters || filterCount ? ' is-on' : '')} aria-expanded={showFilters} aria-controls="filters" onClick={onToggleFilters}>
-        <SlidersHorizontal size={14} /> Filters{filterCount ? <span class="chip-n">{filterCount}</span> : null}
-      </button>
+      {onToggleFilters && (
+        <button type="button" class={'chip' + (showFilters || filterCount ? ' is-on' : '')} aria-expanded={showFilters} aria-controls="filters" onClick={onToggleFilters}>
+          <SlidersHorizontal size={14} /> Filters{filterCount ? <span class="chip-n">{filterCount}</span> : null}
+        </button>
+      )}
     </div>
   );
 }
@@ -193,7 +206,7 @@ export function EmptyState({ q, inLabel, filtered, descriptions, reset }: { q: s
     <div class="empty">
       <p class="empty-title">{q ? <>No match for “{q}”{inLabel}.</> : 'Nothing matches these filters.'}</p>
       {q && <p>Try the noun alone (<code>MgUser</code> instead of <code>Get-MgUser</code>), or fewer words.</p>}
-      {filtered && <button type="button" class="chip" onClick={reset}>Search every source</button>}
+      {filtered && <button type="button" class="chip" onClick={reset}>Search all cmdlets</button>}
     </div>
   );
 }
@@ -218,14 +231,15 @@ export function LoadFailed({ message }: { message: string }) {
   );
 }
 
-export function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) {
+/** No `onPick` (the shell, a failed load): the example searches can't run, so they aren't offered. */
+export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void }) {
   return (
     <div class="intro">
       <h2>Type a fragment. Get the command.</h2>
       <p class="intro-lede">
         {formatCount(TOTAL)} cmdlets from {SOURCES.length} Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
       </p>
-      <ul class="intro-samples" aria-label="Example searches">
+      {onPick && <ul class="intro-samples" aria-label="Example searches">
         {SOURCES.map((s) => (
           <li key={s.id}>
             <button type="button" style={srcStyle(s.id)} onClick={() => onPick(s.id, s.sample)}>
@@ -233,7 +247,7 @@ export function Intro({ onPick }: { onPick: (s: SourceId, q: string) => void }) 
             </button>
           </li>
         ))}
-      </ul>
+      </ul>}
       <dl class="intro-sources">
         {SOURCES.map((s) => (
           <div key={s.id} style={srcStyle(s.id)}>

@@ -131,15 +131,15 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
       {sets.length > 0 && (
         <section class="block">
           <h3>Syntax{sets.length > 1 ? <span class="h-note"> · {sets.length} parameter sets</span> : null}</h3>
-          {sets.map((groups, i) => <SyntaxBlock key={i} groups={groups} />)}
+          {sets.map((groups, i) => <SyntaxBlock key={i} groups={groups} label={sets.length > 1 ? `Copy parameter set ${i + 1}` : 'Copy syntax'} />)}
         </section>
       )}
 
-      {visible.length > 0 && (
+      {params.length > 0 && (
         <section class="block">
           <h3>Parameters</h3>
-          <table class="params">
-            <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col"><span class="sr-only">Required</span></th></tr></thead>
+          {visible.length > 0 && <table class="params">
+            <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col"><span class="sr-only">Required or positional</span></th></tr></thead>
             <tbody>
               {visible.map((p) => (
                 <tr key={p.name}>
@@ -149,7 +149,7 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table>}
           {(hidden > 0 || showCommon) && (
             <button type="button" class="link-btn" aria-expanded={showCommon} onClick={() => setShowCommon((s) => !s)}>
               {showCommon ? 'Hide' : `Show ${hidden}`} pipeline and proxy parameters
@@ -160,14 +160,15 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
 
       {perms.length > 0 && (
         <section class="block">
-          <h3>Permissions <CopyIconButton text={perms.join(', ')} label="Copy all permissions" small /></h3>
+          {/* The copy button sits beside the heading, not in it: heading navigation reads just "Permissions". */}
+          <div class="block-head"><h3>Permissions</h3><CopyIconButton text={perms.join(', ')} label="Copy all permissions" small /></div>
           <ul class="perms">{perms.map((p) => <li key={p}><code>{p}</code></li>)}</ul>
         </section>
       )}
 
       <section class="block">
         <h3>Examples</h3>
-        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
+        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} label={`Copy example ${i + 1}`} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
       </section>
     </>
   );
@@ -176,21 +177,22 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
 const renderTokens = (s: string) => tokenize(s).map((t, i) => (t.t === 'txt' ? t.v : <span key={i} class={'t-' + t.t}>{t.v}</span>));
 
 /** One parameter set: each top-level group is a non-wrapping unit, so lines only break between parameters. */
-function SyntaxBlock({ groups }: { groups: string[] }) {
+function SyntaxBlock({ groups, label }: { groups: string[]; label: string }) {
   const body = useMemo(() => groups.flatMap((g, i) => [i ? ' ' : '', <span key={i} class="sg">{renderTokens(g)}</span>]), [groups]);
-  return <CodeFrame copy={groups.join(' ')} syntax>{body}</CodeFrame>;
+  return <CodeFrame copy={groups.join(' ')} label={label} syntax>{body}</CodeFrame>;
 }
 
-function CodeBlock({ src }: { src: string }) {
+function CodeBlock({ src, label }: { src: string; label: string }) {
   const body = useMemo(() => renderTokens(src), [src]);
-  return <CodeFrame copy={src}>{body}</CodeFrame>;
+  return <CodeFrame copy={src} label={label}>{body}</CodeFrame>;
 }
 
-function CodeFrame({ copy, syntax, children }: { copy: string; syntax?: boolean; children: ComponentChildren }) {
+/** `label` names the copy button apart from the page's others ("Copy example 2"). */
+function CodeFrame({ copy, label, syntax, children }: { copy: string; label: string; syntax?: boolean; children: ComponentChildren }) {
   return (
     <div class={'code' + (syntax ? ' code-syntax' : '')}>
       <pre><code>{children}</code></pre>
-      <CopyIconButton text={copy} label="Copy code" small />
+      <CopyIconButton text={copy} label={label} small />
     </div>
   );
 }

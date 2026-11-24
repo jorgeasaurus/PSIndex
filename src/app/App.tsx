@@ -29,10 +29,10 @@ function Shell() {
       inert
       canvasRef={createRef()}
       detailRef={createRef()}
-      band={<Band q="" source={ALL.id} placeholder={ALL.placeholder} inputRef={createRef()} handlers={INERT_BAND} live={false} activeId="" />}
-      toolbar={<Toolbar label="Loading index…" filterCount={0} showFilters={false} onToggleFilters={() => {}} />}
+      band={<Band q="" source={ALL.id} placeholder="Loading the index…" inputRef={createRef()} handlers={INERT_BAND} live={false} activeId="" />}
+      toolbar={<Toolbar label="Loading index…" filterCount={0} showFilters={false} />}
       results={<ResultsSkeleton />}
-      detail={<Intro onPick={() => {}} />}
+      detail={<Intro />}
     />
   );
 }
@@ -120,7 +120,7 @@ function Search() {
   const escape = useRef(() => {});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement)?.closest('input, textarea, select');
+      const typing = (e.target as HTMLElement)?.closest('input:not([type=checkbox]), textarea, select');
       if ((e.key === '/' && !typing) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();
         inputRef.current?.focus();
@@ -150,13 +150,34 @@ function Search() {
    * closed, i.e. after the render that lifts the narrow-screen dialog's inert from the band.
    */
   const refocus = useRef(false);
-  const back = () => { refocus.current = true; close(); };
+  const closeToSearch = () => { refocus.current = true; close(); };
   useEffect(() => {
     if (open || !refocus.current) return;
     refocus.current = false;
     inputRef.current?.focus({ preventScroll: true });
   }, [open]);
-  escape.current = () => { if (openKey) back(); else if (q) setQ(''); };
+
+  /**
+   * The narrow-screen dialog is a history entry of its own, so the phone's Back gesture closes it
+   * instead of leaving the page. Back from inside the app goes through history too, to drop that entry.
+   */
+  const dialog = !!open && narrow;
+  const pushed = useRef(false);
+  // A layout effect: the entry exists as soon as the dialog is on screen, so Back can never skip it.
+  useLayoutEffect(() => {
+    if (!dialog || pushed.current) return;
+    history.pushState(history.state, '', location.href);
+    pushed.current = true;
+  }, [dialog]);
+  useEffect(() => {
+    const onPop = () => { if (pushed.current) { pushed.current = false; closeToSearch(); } };
+    addEventListener('popstate', onPop);
+    return () => removeEventListener('popstate', onPop);
+  }, []);
+  const back = () => (pushed.current ? history.back() : closeToSearch());
+
+  // Escape gives up a pending Enter first (what was typed stays), then closes the entry, then clears.
+  escape.current = () => { if (enterFor !== null) setSel(settle); else if (openKey) back(); else if (q) setQ(''); };
 
   // Resolve a pending Enter once its search's results are the ones on screen.
   useEffect(() => {
@@ -196,7 +217,7 @@ function Search() {
     <Frame
       source={filters.source}
       isOpen={!!open}
-      dialog={!!open && narrow}
+      dialog={dialog}
       inert={false}
       canvasRef={canvasRef}
       detailRef={detailRef}
@@ -206,9 +227,10 @@ function Search() {
           source={filters.source}
           placeholder={scope.placeholder}
           inputRef={inputRef}
-          live
           activeId={activeId}
-          inert={!!open && narrow}
+          inert={dialog}
+          live={!loadError}
+          dark={theme === 'dark'}
           handlers={{
             onQuery: (value, caret) => { setQ(value); pulse(caret); },
             onKeyDown,
@@ -221,16 +243,16 @@ function Search() {
       }
       toolbar={
         <>
-          <Toolbar label={countLabel} timing={timing} filterCount={filterCount} showFilters={showFilters} onToggleFilters={() => setShowFilters((s) => !s)} />
+          <Toolbar label={countLabel} timing={timing} filterCount={filterCount} showFilters={showFilters} onToggleFilters={loadError ? undefined : () => setShowFilters((s) => !s)} />
           {/* Above the results, so it shows at every width (narrow screens hide the detail pane). */}
           {missing && (
             <div class="notice notice-error notice-link" role="status">
               <p>The linked cmdlet <code>{missing}</code> isn’t in the index. It may have been renamed or removed.</p>
-              <button type="button" class="chip" onClick={close}>Dismiss</button>
+              <button type="button" class="chip" onClick={() => { close(); inputRef.current?.focus(); }}>Dismiss</button>
             </div>
           )}
           {results?.descriptions === 'failed' && <DescriptionsFailed />}
-          {showFilters && (
+          {showFilters && !loadError && (
             <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={() => setFilters({ ...EMPTY_FILTERS, source: filters.source })} />
           )}
         </>
@@ -254,7 +276,7 @@ function Search() {
           // Keyed by entry: each one starts fresh (no related list or body from the previous entry).
           ? <Detail key={open.key} row={open} client={client} onOpen={openRow} onClose={back} takeFocus={narrow} />
           // A sample is a fresh search in its source: no filters carried over that could hide it.
-          : <Intro onPick={(s, sample) => { setFilters({ ...EMPTY_FILTERS, source: s }); setQ(sample); inputRef.current?.focus(); }} />
+          : <Intro onPick={loadError ? undefined : (s, sample) => { setFilters({ ...EMPTY_FILTERS, source: s }); setQ(sample); inputRef.current?.focus(); }} />
       }
     />
   );

@@ -94,6 +94,14 @@ const scenarios = [
       check(state.dialog === 'dialog' && state.bandInert && state.resultsInert, 'the open entry is a modal dialog that takes focus', JSON.stringify(state));
       await p.click('.detail-back');
       await p.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Search cmdlets');
+      // The phone's Back gesture closes the entry instead of leaving the page.
+      await p.keyboard.press('Enter');
+      await titleIs(p, 'Get-MgUser');
+      await p.goBack();
+      await p.waitForFunction(() => !document.querySelector('.detail-title'));
+      check(p.url().startsWith(BASE) && (await p.inputValue('input[type=search]')) === 'get-mguser' && !param(p, 'c'), 'Back closes the entry dialog', p.url());
+      const width = await p.evaluate(() => document.documentElement.scrollWidth);
+      check(width <= 390, 'no sideways page scroll at phone width', String(width));
     },
   },
   {
@@ -222,7 +230,7 @@ const scenarios = [
       await p.goto(BASE);
       await rowsReady(p);
       const before = await p.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      await p.click('button[aria-label="Toggle light or dark theme"]');
+      await p.click('button[aria-label="Dark theme"]');
       const after = await p.evaluate(() => [document.documentElement.dataset.theme, localStorage.getItem('psindex-theme')]);
       check(after[0] && after[0] !== before && after[0] === after[1], 'theme toggle applies and stores the theme', after.join(' / '));
     },
@@ -345,9 +353,66 @@ const scenarios = [
       await p.goto(`${BASE}/?s=mecm`);
       await rowsReady(p);
       await descTried;
-      // Names still search without descriptions.
+      // Names still search without descriptions, and the page says only names are searched.
       await p.fill('input[type=search]', 'device collection');
       await p.waitForFunction(() => /Collection/.test(document.querySelector('.result .result-name')?.textContent ?? ''));
+      check(/only cmdlet names/.test(await p.textContent('.pane-results')), 'a failed description file is announced');
+      // A query only a description could match reaches the final empty state, not a busy one.
+      await p.fill('input[type=search]', 'qqqzzzxx');
+      await p.waitForSelector('.empty .chip');
+      check(!(await p.locator('.empty[aria-busy]').count()), 'empty state is final once descriptions failed');
+    },
+  },
+  {
+    name: 'stale module file offers Reload',
+    allowErrors: true,
+    async setup(ctx) { await ctx.route(`**${BUILD_PATH}data/**`, (r) => r.fulfill({ status: 404, body: '' })); },
+    async run(p) {
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      await p.waitForSelector('.detail .notice-error');
+      const buttons = await p.locator('.detail .notice-error button').allTextContents();
+      check(buttons.join() === 'Reload', 'a 404 offers Reload, not a retry that cannot work', buttons.join());
+    },
+  },
+  {
+    name: 'Try again keeps focus',
+    allowErrors: true,
+    async setup(ctx) {
+      let first = true;
+      await ctx.route(`**${BUILD_PATH}data/**`, (r) => (first ? ((first = false), r.abort()) : r.continue()));
+    },
+    async run(p) {
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      await p.click('.detail .notice-error button:text("Try again")');
+      await p.waitForSelector('.detail .code-syntax');
+      const focus = await p.evaluate(() => document.activeElement?.id);
+      check(focus === 'detail-title', 'focus moves to the entry title after Try again', focus);
+    },
+  },
+  {
+    name: 'link hygiene',
+    async run(p) {
+      await p.goto(`${BASE}/?s=Graph&q=%20%20get-mguser%20%20&c=%20graph:Get-MgUser%20`);
+      await titleIs(p, 'Get-MgUser');
+      await p.waitForFunction(() => location.search === '?q=get-mguser&s=graph&c=graph%3AGet-MgUser');
+      await p.goto(`${BASE}/?c=%20%20`);
+      await rowsReady(p);
+      check(!(await p.locator('.notice-link').count()) && !param(p, 'c'), 'a blank link key is no link');
+    },
+  },
+  {
+    name: 'Escape cancels a pending Enter',
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
+    async run(p) {
+      await p.goto(BASE);
+      await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+      await p.fill('input[type=search]', 'get-mguser');
+      await p.keyboard.press('Enter');
+      await p.keyboard.press('Escape');
+      this.release();
+      await topIs(p, 'Get-MgUser');
+      await nextFrame(p);
+      check((await p.inputValue('input[type=search]')) === 'get-mguser' && !(await p.locator('.detail-title').count()), 'Escape gives up the Enter and keeps the query');
     },
   },
   {
@@ -358,7 +423,7 @@ const scenarios = [
       await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
       await p.fill('input[type=search]', 'get-mguser');
       await p.keyboard.press('Enter');
-      await p.keyboard.press('Escape'); // clears the query: a new search supersedes the pending Enter
+      await p.fill('input[type=search]', 'get-az'); // a new search supersedes the pending Enter
       this.release();
       await rowsReady(p);
       // The worker answers in order: once a search issued now has rendered, any row fetch the

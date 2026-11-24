@@ -114,7 +114,7 @@ export function ResultList({ navRef, client, results, openKey, onOpen, onCursor,
   for (let i = range.start; refs && i < Math.min(refs.length, range.end); i++) {
     const r = rows.get(refs[i]);
     items.push(r
-      ? <ResultRow key={refs[i]} i={i} row={r} query={query} active={i === active} open={r.key === openKey} onOpen={onOpen} onHover={setActive} />
+      ? <ResultRow key={refs[i]} i={i} total={refs.length} row={r} query={query} active={i === active} open={r.key === openKey} onOpen={onOpen} onHover={setActive} />
       : <SkeletonRow key={refs[i]} i={i} />);
   }
 
@@ -139,12 +139,15 @@ const SkeletonRows = () => (
 /** Placeholder list before the search client exists (also the server-rendered state). */
 export const ResultsSkeleton = () => <div class="results" aria-busy="true" aria-label="Search results"><SkeletonRows /></div>;
 
-function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number; row: Row; query: string; active: boolean; open: boolean; onOpen: (r: Row) => void; onHover: (i: number) => void }) {
+function ResultRow({ i, total, row, query, active, open, onOpen, onHover }: { i: number; total: number; row: Row; query: string; active: boolean; open: boolean; onOpen: (r: Row) => void; onHover: (i: number) => void }) {
   const tag = row.dup ? row.module : isWarnExtra(sourceOf(row.source), row.extra) ? row.extra : '';
   return (
     <div
       id={rowId(i)}
       role="option"
+      // Only a window of rows is in the DOM: each states its place in the whole list.
+      aria-setsize={total}
+      aria-posinset={i + 1}
       aria-selected={active}
       aria-current={open || undefined}
       class={'result' + (active ? ' is-active' : '') + (open ? ' is-open' : '')}

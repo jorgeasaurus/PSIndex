@@ -170,6 +170,8 @@ def parse_cmdlet_doc(filepath):
 def find_latest_azps_dir(docs_root):
     """Find the highest-versioned azps-* subdirectory."""
     root = Path(docs_root)
+    if not root.is_dir():
+        raise SystemExit(f'::error::az: docs root {docs_root} is not a directory')
     candidates = [d for d in root.iterdir() if d.is_dir() and d.name.startswith('azps-')]
     if not candidates:
         # Look one level deeper
@@ -177,7 +179,7 @@ def find_latest_azps_dir(docs_root):
             if sub.is_dir():
                 candidates += [d for d in sub.iterdir() if d.is_dir() and d.name.startswith('azps-')]
     if not candidates:
-        raise FileNotFoundError(f'No azps-* directory found under {docs_root}')
+        raise SystemExit(f'::error::az: no azps-* docs directory under {docs_root}; the upstream layout changed or the clone failed')
 
     def ver_key(d):
         parts = re.findall(r'\d+', d.name)

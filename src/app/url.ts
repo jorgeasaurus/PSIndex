@@ -58,7 +58,7 @@ export function writeUrl({ q, filters, open }: UrlState) {
   if (open) p.set(OPEN, open);
   const qs = p.toString();
   const url = location.pathname + (qs ? '?' + qs : '');
-  if (url !== location.pathname + location.search) history.replaceState(null, '', url);
+  if (url !== location.pathname + location.search) history.replaceState(history.state, '', url); // keeps the entry's state (the narrow-screen dialog's)
 }
 
 /** Absolute link that opens one entry. */

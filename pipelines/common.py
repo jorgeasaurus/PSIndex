@@ -5,6 +5,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -110,6 +111,25 @@ def previous_module_versions(source_id):
         if version:
             out[f.stem] = version
     return out
+
+
+def gallery_module_versions(packages, source_id):
+    """Module name -> latest PowerShell Gallery version, for {module name: Gallery package}.
+
+    A module whose lookup fails keeps its last committed version (with a warning), as
+    source_version does for the source's own version, so an outage never blanks them.
+    """
+    print(f"Fetching module versions from the PowerShell Gallery ({len(packages)} modules)...")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        found = dict(zip(packages, executor.map(gallery_latest_version, packages.values())))
+    missing = [m for m, v in found.items() if not v]
+    print(f"  Resolved {len(found) - len(missing)}/{len(found)} module versions")
+    if missing:
+        previous = previous_module_versions(source_id)
+        print(f"::warning::{source_id}: {len(missing)} module versions unavailable; keeping the previous ones")
+        for m in missing:
+            found[m] = previous.get(m)
+    return found
 
 
 def gallery_dependencies(package, version, source_id):

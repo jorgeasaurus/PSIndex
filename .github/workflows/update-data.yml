@@ -13,11 +13,15 @@ on:
         description: "Comma-separated sources to refresh (ids of pipelines/<id>/source.env) or 'all'"
         default: all
 
+# One run at a time; a run started meanwhile waits. GitHub keeps one waiting run per group, so a
+# newer dispatch replaces an older one still waiting: to refresh several sources, dispatch them
+# together ("graph,mecm"), not one by one.
 concurrency:
   group: update-data
   cancel-in-progress: false
 
-# Read-only by default: only the commit job writes, and it alone runs no upstream content.
+# Read-only by default. Only the commit job may write, and only its push step holds a credential:
+# its checkout keeps no token, so the install and build it runs over refreshed data cannot push.
 permissions:
   contents: read
 
@@ -39,9 +43,11 @@ jobs:
           want=$(printf '%s' "$WANT" | tr 'A-Z' 'a-z' | tr -d '[:space:]')
           if [ -z "$want" ] || [ "$want" = "all" ]; then want="$known"; fi
           sources=$(jq -cn --arg w "$want" --arg k "$known" '($k | split(",")) as $known
-            | ($w | split(",") | map(select(length > 0))) as $want
+            | ($w | split(",") | map(select(length > 0)) | unique) as $want
             | ($want - $known) as $unknown
-            | if ($unknown | length) > 0 then error("unknown sources: \($unknown | join(", ")); known: \($known | join(", "))") else $want end')
+            | if ($unknown | length) > 0 then error("unknown sources: \($unknown | join(", ")); known: \($known | join(", "))")
+              elif ($want | length) == 0 then error("no sources given; known: \($known | join(", "))")
+              else $want end')
           echo "sources=$sources" >> "$GITHUB_OUTPUT"
 
   refresh:
@@ -82,41 +88,51 @@ jobs:
           retention-days: 3
 
   commit:
-    needs: refresh
-    # Commit whatever refreshed cleanly, even if one source failed.
-    if: ${{ !cancelled() }}
+    needs: [plan, refresh]
+    # Commit whatever refreshed cleanly, even if one source failed; with no plan there is nothing to commit.
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:
           path: refreshed
 
       - name: Apply refreshed sources
+        id: apply
         shell: bash
         run: |
           shopt -s nullglob
+          any=false
           for dir in refreshed/data-*; do
             src="${dir#refreshed/data-}"
             rm -rf "data/$src" && mkdir -p "data/$src" && cp -r "$dir"/. "data/$src/"
             echo "applied $src"
+            any=true
           done
+          if [ "$any" = false ]; then echo "::warning::No source refreshed cleanly; nothing to commit."; fi
+          echo "any=$any" >> "$GITHUB_OUTPUT"
 
       # The push below uses GITHUB_TOKEN, which does not trigger ci.yml, yet Vercel deploys it.
       # So the combined refreshed data passes the same gate as a PR (npm run verify, which ci.yml
       # runs too); if upstream docs moved a cmdlet the suite relies on, nothing ships until fixed.
       - uses: actions/setup-node@v4
+        if: steps.apply.outputs.any == 'true'
         with:
           node-version: 22
           cache: npm
       - name: Build and test the refreshed site
+        if: steps.apply.outputs.any == 'true'
         run: npm ci && npm run verify
 
       - name: Commit
+        if: steps.apply.outputs.any == 'true'
         shell: bash
         # The bot identity for the commit.
         env:
@@ -124,6 +140,7 @@ jobs:
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GH_TOKEN: ${{ github.token }}
         run: |
           git add data
           if git diff --cached --quiet; then echo "No data changes."; exit 0; fi
@@ -131,4 +148,4 @@ jobs:
           git commit -m "chore(data): refresh ${changed}"
           # Push exactly the tree tested above. If main moved meanwhile the push is rejected (not a
           # fast-forward) and the run fails; the next run refreshes and tests against the new main.
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"

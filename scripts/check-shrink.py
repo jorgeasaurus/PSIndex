@@ -14,9 +14,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+if not 2 <= len(sys.argv) <= 3:
+    sys.exit("usage: check-shrink.py <source-id> [max-drop-ratio]  (run from the repository root)")
 src = sys.argv[1]
-limit = float(sys.argv[2]) if len(sys.argv) > 2 else 0.10
+try:
+    limit = float(sys.argv[2]) if len(sys.argv) > 2 else 0.10
+except ValueError:
+    sys.exit(f"check-shrink: max-drop-ratio must be a number such as 0.10, not {sys.argv[2]!r}")
 path = Path("data") / src / "manifest.json"
+if not path.is_file():
+    sys.exit(f"check-shrink: {path} not found (an unknown source id, or not run from the repository root)")
 
 new_doc = json.loads(path.read_text(encoding="utf-8"))
 new = len(new_doc["d"])
@@ -28,8 +35,8 @@ except subprocess.CalledProcessError:
     print(f"{src}: no committed manifest, accepting {new} entries")
     sys.exit(0)
 
-drop = (old - new) / old if old else 0
-print(f"{src}: {old} -> {new} entries ({-drop:+.1%})")
-if drop > limit:
-    print(f"::error::{src} lost {old - new} entries ({drop:.1%} > {limit:.0%}); refusing to commit a partial refresh")
+change = (new - old) / old if old else 0.0
+print(f"{src}: {old} -> {new} entries ({change + 0.0:+.1%})")  # + 0.0 turns -0.0 into 0.0
+if old - new > limit * old:
+    print(f"::error::{src} lost {old - new} entries ({-change:.2%}, over the {limit:.0%} limit); refusing to commit a partial refresh")
     sys.exit(1)

@@ -1,9 +1,11 @@
 // Tiny PowerShell tokenizer for syntax blocks and examples. Returns tokens; the UI renders them.
 // Token kinds and their patterns, in match order. The kinds become CSS classes (`t-<kind>`, Detail.tsx).
 const PATTERNS = {
-  com: String.raw`#[^\n]*`,
+  // A block comment (<# ... #>) or a line comment.
+  com: String.raw`<#[\s\S]*?#>|#[^\n]*`,
+  // Here-strings (@" ... "@ on lines of their own) hold quotes freely, so they come first.
   // PowerShell escapes with a backtick or a doubled quote; a backslash is an ordinary character ("C:\Temp\").
-  str: String.raw`"(?:[^"\x60]|\x60.|"")*"|'(?:[^']|'')*'`,
+  str: String.raw`@"[ \t]*\r?\n[\s\S]*?\r?\n"@|@'[ \t]*\r?\n[\s\S]*?\r?\n'@|"(?:[^"\x60]|\x60.|"")*"|'(?:[^']|'')*'`,
   var: String.raw`\$(?:\{[^}]*\}|[\w:]+)`,
   cmd: String.raw`\b[A-Z][a-z]+-[A-Za-z0-9]+\b`,
   param: String.raw`(?<![\w-])-[A-Za-z][\w]*`,
@@ -128,8 +130,9 @@ export function parseSyntax(syntax: string): Syntax {
 
 /**
  * Parameters some pipelines document (MECM) take precedence for their order and descriptions.
- * Type, position and "required" come from the syntax where it has the parameter: the docs' own
- * Required flag is per parameter set, so it would mark a parameter of one set as always required.
+ * Type, position and "required" come from the syntax alone: the docs' own Required flag is per
+ * parameter set, so it would mark a parameter of one set as always required. A parameter the
+ * syntax doesn't show is not known to be required anywhere.
  */
 export function withDocumented(parsed: Param[], documented: DocumentedParam[]): Param[] {
   if (!documented.length) return parsed;
@@ -137,7 +140,7 @@ export function withDocumented(parsed: Param[], documented: DocumentedParam[]): 
   return documented.map((p) => ({
     name: p.name,
     type: p.type || byName.get(p.name)?.type || '',
-    required: byName.get(p.name)?.required ?? p.required,
+    required: byName.get(p.name)?.required ?? false,
     positional: byName.get(p.name)?.positional ?? false,
     description: p.description,
   }));
