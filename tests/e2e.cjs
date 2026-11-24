@@ -111,17 +111,17 @@ const scenarios = [
     name: 'filters that hide every match are named as the reason',
     async run(p) {
       await p.goto(`${BASE}/?s=graph&verb=Remove&q=get-mguser`);
-      const text = await p.waitForSelector('.empty .empty-title').then((e) => e.textContent());
+      const text = await p.waitForSelector('.empty:not([aria-busy]) .empty-title').then((e) => e.textContent());
       check(/filters hide/.test(text) && !/No match/.test(text), 'the empty state says the filters hide the matches', text);
       check(!(await p.$('.empty button:has-text("Search mguser")')), 'no noun hint when the query does match');
       await p.click('.empty button:has-text("Clear filters")');
       await topIs(p, 'Get-MgUser');
       await p.goto(`${BASE}/?s=graph&verb=Remove&q=zzqqxx`);
-      const none = await p.waitForSelector('.empty .empty-title').then((e) => e.textContent());
+      const none = await p.waitForSelector('.empty:not([aria-busy]) .empty-title').then((e) => e.textContent());
       check(/^No match/.test(none), 'a query with no match anywhere still says no match', none);
       // A misspelling found only by typo matching is no claim that the filters hide real matches.
       await p.goto(`${BASE}/?s=graph&verb=Remove&q=get-mgusrr`);
-      const typo = await p.waitForSelector('.empty .empty-title').then((e) => e.textContent());
+      const typo = await p.waitForSelector('.empty:not([aria-busy]) .empty-title').then((e) => e.textContent());
       check(/^No match/.test(typo), 'near misses are not counted as matches the filters hide', typo);
     },
   },
