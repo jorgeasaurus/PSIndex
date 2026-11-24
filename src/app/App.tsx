@@ -7,7 +7,7 @@ import { ResultList, ResultsSkeleton, type ListNav } from './ResultList';
 import { Detail } from './Detail';
 import { Band, DescriptionsFailed, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
 import { ALL, formatCount, scopeOf, searchText } from './sources';
-import { EMPTY_FILTERS, activeFilters, canonicalFilters, readUrl, sameFilters, urlOf, writeUrl, type UrlState } from './url';
+import { EMPTY_FILTERS, activeFilters, readUrl, sameFilters, urlOf, writeUrl, type UrlState } from './url';
 import type { Facets, Filters, Results, Row } from './types';
 
 /**
@@ -101,7 +101,6 @@ function Search() {
   // A newer search also gives up an Enter pressed for the previous one.
   useLayoutEffect(() => { client.search(q, filters); setSel(settle); }, [q, filters]);
   // A facet value from a link in another case (?verb=get) takes the facet's spelling.
-  useEffect(() => { if (results) setFilters((f) => canonicalFilters(f, results.facets)); }, [results?.facets]);
   const open = !sel ? null : 'row' in sel ? sel.row : 'enter' in sel ? sel.shown : null;
   const link = sel && 'link' in sel ? sel.link : '';
   const enterFor = sel && 'enter' in sel ? sel.enter : null;

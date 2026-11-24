@@ -758,9 +758,16 @@ const scenarios = [
     name: 'filter links and recovery',
     async run(p) {
       await p.goto(`${BASE}/?verb=get`);
-      await p.waitForFunction(() => new URLSearchParams(location.search).get('verb') === 'Get');
       await rowsReady(p);
-      check((await p.locator('.result:not(.result-skel)').count()) > 0, 'a facet value in another case matches and is canonicalised');
+      check((await p.locator('.result:not(.result-skel)').count()) > 0, 'a facet value in another case matches');
+      await p.click('.chip[aria-controls=filters]');
+      const shown = await p.$eval('.filters select', (s) => s.selectedOptions[0]?.textContent);
+      check(shown === 'Get', 'the filter bar shows the facet in its own spelling', shown);
+      // Matching in any case is no new search: an Enter pressed before the results still opens.
+      await p.goto(`${BASE}/?q=get-mguser&verb=get`);
+      await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+      await p.keyboard.press('Enter');
+      await titleIs(p, 'Get-MgUser');
       await p.goto(`${BASE}/?s=az&ver=beta`);
       await rowsReady(p);
       check(!param(p, 'ver') && (await p.locator('.result:not(.result-skel)').count()) > 0, 'a ver filter on a source without one is dropped', p.url());

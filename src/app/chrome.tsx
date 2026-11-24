@@ -214,13 +214,15 @@ export function FilterBar({ facets, filters, extraLabel, setFilter, clear }: {
 }
 
 function Select({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
+  // Facet values match in any case (?verb=get filters on Get), here as in the search.
+  const selected = (value && options.find((o) => o.toLowerCase() === value.toLowerCase())) || value;
   return (
     <label class="select">
       <span>{label}</span>
-      <select value={value} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>
+      <select value={selected} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>
         <option value="">Any</option>
         {/* An active value this scope doesn't have (a stale link, a verb carried over from another source): still shown, so it can be cleared. */}
-        {value && !options.includes(value) && <option value={value}>{value} (none here)</option>}
+        {selected && !options.includes(selected) && <option value={selected}>{selected} (none here)</option>}
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </label>

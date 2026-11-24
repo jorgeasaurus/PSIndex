@@ -41,16 +41,6 @@ export const activeFilters = (f: Filters) => FILTER_KEYS.filter((k) => k !== 'so
 
 export const sameFilters = (a: Filters, b: Filters) => FILTER_KEYS.every((k) => a[k] === b[k]);
 
-/**
- * Facet values from a link match in any case (?verb=get); once the facets are known they take the
- * facet's own spelling, so the URL and the filter bar read Get. The same object when nothing changes.
- */
-export function canonicalFilters(f: Filters, facets: Facets): Filters {
-  const fix = (v: string, values: string[]) => (v && values.find((o) => o.toLowerCase() === v.toLowerCase())) || v;
-  const next = { ...f, verb: fix(f.verb, facets.verbs), module: fix(f.module, facets.modules), category: fix(f.category, facets.categories), extra: fix(f.extra, facets.extras) };
-  return sameFilters(next, f) ? f : next;
-}
-
 export interface UrlState { q: string; filters: Filters; open: string }
 
 export function readUrl(): UrlState {
