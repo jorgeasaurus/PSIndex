@@ -154,12 +154,32 @@ LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 ESCAPE_RE = re.compile(r"\\([\\`*_\[\]])")
 
 
-def clean_synopsis(line):
-    """A SYNOPSIS line as plain text: links become their text, emphasis loses its markup and
-    markdown escapes ("Standard\\_AzureFrontDoor") their backslash."""
-    line = LINK_RE.sub(r"\1", line)
-    line = EMPHASIS_RE.sub(lambda m: m.group(2) if m.group(3) is None else m.group(3), line)
-    return ESCAPE_RE.sub(r"\1", line).strip()
+def clean_synopsis(text):
+    """Synopsis text as plain text: links become their text, emphasis loses its markup (nested
+    emphasis too, "**_a_**") and markdown escapes ("Standard\\_AzureFrontDoor") their backslash."""
+    text = LINK_RE.sub(r"\1", text)
+    while True:
+        plain = EMPHASIS_RE.sub(lambda m: m.group(2) if m.group(3) is None else m.group(3), text)
+        if plain == text:
+            break
+        text = plain
+    return ESCAPE_RE.sub(r"\1", text).strip()
+
+
+def synopsis_from(section):
+    """A SYNOPSIS section's description: its first paragraph as plain text. Callouts the docs
+    open it with ("> [!NOTE]", "> [!IMPORTANT]", any "> " block) are not the description."""
+    lines = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(">"):
+            continue
+        if not stripped:
+            if lines:
+                break
+            continue
+        lines.append(stripped)
+    return clean_synopsis(" ".join(lines))
 
 
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})\s*([^\s`]*)")

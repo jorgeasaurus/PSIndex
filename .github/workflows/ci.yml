@@ -24,6 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # Build, typecheck, Playwright's Chromium install, the browser suite, the MCP HTTP suite and
-      # the pipeline unit tests: the same gate update-data.yml runs on refreshed data.
+      # Build, typecheck, Playwright's Chromium install, the browser suite, the MCP HTTP suite, the
+      # pipeline unit tests and the text-cleaning tests: the same gate update-data.yml runs on
+      # refreshed data.
       - run: npm run verify

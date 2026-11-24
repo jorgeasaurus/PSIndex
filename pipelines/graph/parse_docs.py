@@ -19,7 +19,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from common import examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
+from common import examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, synopsis_from, syntax_from
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -87,29 +87,6 @@ def extract_section(text: str, heading: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def extract_synopsis(section: str) -> str:
-    """Get the first paragraph from SYNOPSIS, skipping NOTE blocks."""
-    lines = []
-    in_note = False
-    for line in section.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("> [!NOTE]") or stripped.startswith("> [!TIP]"):
-            in_note = True
-            continue
-        if in_note:
-            if stripped.startswith(">"):
-                continue
-            if not stripped:
-                in_note = False
-                continue
-            in_note = False
-        if not stripped and lines:
-            break
-        if stripped:
-            lines.append(stripped)
-    return " ".join(lines)
-
-
 def extract_permissions(section: str) -> list:
     """Parse permission names from the permissions table in DESCRIPTION."""
     permissions = set()
@@ -156,7 +133,7 @@ def parse_cmdlet_file(filepath, module_name, api_version):
 
     # SYNOPSIS -> description
     synopsis_section = extract_section(text, "SYNOPSIS")
-    description = extract_synopsis(synopsis_section)
+    description = synopsis_from(synopsis_section)
     if not description:
         description = "Microsoft Graph PowerShell cmdlet."
 

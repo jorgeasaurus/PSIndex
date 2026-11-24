@@ -13,7 +13,7 @@ PIPELINES = Path(__file__).resolve().parent.parent
 SAMPLES = Path(__file__).resolve().parent / "samples"
 sys.path.insert(0, str(PIPELINES))
 
-from common import clean_synopsis, examples_from, syntax_from  # noqa: E402
+from common import clean_synopsis, examples_from, synopsis_from, syntax_from  # noqa: E402
 
 
 def parser(source):
@@ -87,6 +87,13 @@ class CleanSynopsis(unittest.TestCase):
     def test_underscores_and_stars_in_text_kept(self):
         line = "Upgrade from Standard_AzureFrontDoor to Premium\\_AzureFrontDoor for user_name, 2 * 3, Get-* cmdlets."
         self.assertEqual(clean_synopsis(line), "Upgrade from Standard_AzureFrontDoor to Premium_AzureFrontDoor for user_name, 2 * 3, Get-* cmdlets.")
+
+    def test_nested_emphasis(self):
+        self.assertEqual(clean_synopsis("Use **_only_** this and *__that__*."), "Use only this and that.")
+
+    def test_synopsis_skips_callouts(self):
+        section = "> [!NOTE]\n> This cmdlet is retired in the cloud.\n\nUse the Get-ClientAccessRule cmdlet to view\nclient access rules.\n\nMore text."
+        self.assertEqual(synopsis_from(section), "Use the Get-ClientAccessRule cmdlet to view client access rules.")
 
 
 class ExchangeCategory(unittest.TestCase):

@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import clean_synopsis, examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
+from common import examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, synopsis_from, syntax_from
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -115,7 +115,7 @@ def parse_cmdlet_doc(filepath, workload_name, default_module):
         category = workload_name
 
     synopsis_sec = extract_section(text, 'SYNOPSIS')
-    description = clean_synopsis(synopsis_sec.splitlines()[0]) if synopsis_sec else ''
+    description = synopsis_from(synopsis_sec)
 
     syntax_sec = extract_section(text, 'SYNTAX')
     syntax = syntax_from(syntax_sec)
