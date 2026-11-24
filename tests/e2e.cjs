@@ -3,6 +3,7 @@
 // Serves dist/ itself on its own port (it never touches a running `astro preview`).
 // Needs Playwright with Chromium available (`npx playwright install chromium`).
 const http = require('node:http');
+const { existsSync } = require('node:fs');
 const sirv = require('sirv');
 const { chromium } = require('playwright');
 const { total, build } = require('../src/sources.generated.json');
@@ -548,7 +549,10 @@ async function runScenario(browser, sc) {
 }
 
 (async () => {
-  const server = http.createServer(sirv('dist', { dev: true }));
+  // The Node adapter writes the static site to dist/client so /mcp can be a function.
+  // A static build writes it to dist/. Serve whichever this build produced.
+  const site = existsSync('dist/client/index.html') ? 'dist/client' : 'dist';
+  const server = http.createServer(sirv(site, { dev: true }));
   await new Promise((res, rej) => server.once('error', rej).listen(PORT, res));
   let browser;
   try {
