@@ -401,7 +401,9 @@ kbd {
 .empty p { margin: 0; color: var(--muted); }
 .empty .empty-title { color: var(--text); font-weight: 600; font-size: 15px; overflow-wrap: anywhere; /* a long pasted query */ }
 .empty code { font-size: 0.92em; color: var(--text); }
-.empty .chip { justify-self: start; }
+/* A suggestion holds the pasted name, which can be longer than the pane: it wraps, after "Search" first. */
+.empty .chip { justify-self: start; display: block; max-width: 100%; height: auto; padding: 5px 11px; line-height: 18px; border-radius: 15px; text-align: start; }
+.empty .chip code { overflow-wrap: anywhere; }
 
 /* ---------- Detail ---------- */
 .pane-detail { overflow-y: auto; }
@@ -590,11 +592,14 @@ kbd {
 }
 .mcp h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
 .mcp h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
-.mcp-body { display: grid; gap: 22px; padding: 4px 20px 20px; }
+/* minmax(0, 1fr): a config's long line scrolls in its block instead of widening the panel. */
+.mcp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 4px 20px 20px; }
 .mcp-body > p { margin: 0; color: var(--muted); font-size: 14px; max-width: 62ch; }
-.mcp-setups { display: grid; gap: 18px; }
+.mcp-setups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 .mcp-file { margin: -4px 0 8px; color: var(--text); font-family: var(--font-code); font-size: 13px; overflow-wrap: anywhere; }
 .mcp-note { margin: -4px 0 8px; color: var(--muted); font-size: 13px; }
+/* A config is pasted as is: a long line scrolls sideways, so a wrap never looks like a misindented line. */
+.mcp .code pre { white-space: pre; overflow-wrap: normal; }
 .mcp-endpoint {
   display: flex;
   flex-wrap: wrap;

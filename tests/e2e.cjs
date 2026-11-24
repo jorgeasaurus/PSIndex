@@ -587,7 +587,7 @@ const scenarios = [
 
       const text = await p.locator('#mcp-panel').innerText();
       check(/no authentication/i.test(text) && /read-only/i.test(text), 'says what the endpoint is', text.split('\n')[1]);
-      check(text.includes(URL) && text.includes('~/.cursor/mcp.json') && text.includes('.mcp.json') && text.includes('claude_desktop_config.json'), 'shows the endpoint and the three config files');
+      check(text.includes(URL) && text.includes('~/.cursor/mcp.json') && text.includes('.mcp.json at the workspace root') && text.includes('claude mcp add --transport http psindex') && text.includes('Add custom connector') && !text.includes('.vscode/mcp.json'), 'shows the endpoint and each client\'s setup');
       check(['search_cmdlets', 'get_cmdlet', 'list_modules'].every((name) => text.includes(name)), 'names the three tools');
 
       await p.click('#mcp-panel button[aria-label="Copy endpoint"]');
@@ -601,10 +601,11 @@ const scenarios = [
       };
       const cursor = JSON.parse(await readConfig('Copy Cursor config'));
       const vscode = JSON.parse(await readConfig('Copy VS Code config'));
-      const claude = JSON.parse(await readConfig('Copy Claude Desktop config'));
+      const claude = JSON.parse(await readConfig('Copy Claude Code config'));
       check(cursor.mcpServers?.psindex?.url === URL && !cursor.mcpServers.psindex.type, 'Cursor config is a remote mcpServers url', JSON.stringify(cursor));
       check(vscode.mcpServers?.psindex?.type === 'http' && vscode.mcpServers.psindex.url === URL && !vscode.servers, 'VS Code config is mcpServers with type http', JSON.stringify(vscode));
-      check(claude.mcpServers?.psindex?.command === 'npx' && claude.mcpServers.psindex.args?.includes('mcp-remote') && claude.mcpServers.psindex.args?.includes(URL), 'Claude Desktop config runs mcp-remote', JSON.stringify(claude));
+      check(claude.mcpServers?.psindex?.type === 'http' && claude.mcpServers.psindex.url === URL, 'Claude Code config is mcpServers with type http', JSON.stringify(claude));
+      check(!(await p.locator('#mcp-panel section[aria-label="Claude Desktop and claude.ai"] pre').count()), 'Claude Desktop gets connector steps, not a config file');
 
       await p.keyboard.press('/');
       const slashStays = await p.evaluate(() => {
@@ -672,6 +673,21 @@ const scenarios = [
       await p.setViewportSize({ width: 390, height: 844 });
       const phoneBtn = await p.locator(openBtn).boundingBox();
       check(phoneBtn && phoneBtn.x >= 0 && phoneBtn.x + phoneBtn.width <= 390 && phoneBtn.width >= 24, 'the info button fits and stays tappable at 390px', JSON.stringify(phoneBtn));
+      await p.click(openBtn);
+      await p.waitForSelector('#mcp-panel[open]');
+      // Each source line of a config is one rendered line: a long one scrolls sideways instead of wrapping.
+      const wraps = await p.evaluate(() => [...document.querySelectorAll('#mcp-panel .code pre')].map((pre) => {
+        const lines = pre.textContent.split('\n').length;
+        const lh = parseFloat(getComputedStyle(pre).lineHeight);
+        const cs = getComputedStyle(pre);
+        const inner = pre.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+        const panel = document.getElementById('mcp-panel').getBoundingClientRect();
+        const r = pre.getBoundingClientRect();
+        return { lines, rendered: Math.round(inner / lh), scrolls: pre.scrollWidth > pre.clientWidth, inside: r.right <= panel.right + 1 };
+      }));
+      check(wraps.length === 3 && wraps.every((w) => w.lines === w.rendered && w.inside) && wraps.some((w) => w.scrolls), 'config lines do not wrap at 390px', JSON.stringify(wraps));
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => !document.querySelector('#mcp-panel')?.open);
       const darkBg = await fits('dark');
       const lightBg = await fits('light');
       check(darkBg !== lightBg, 'the panel follows the light and dark themes', `${darkBg} / ${lightBg}`);
@@ -744,6 +760,13 @@ const scenarios = [
       await p.click('.empty .chip');
       await topIs(p, 'Get-MgUser');
       check((await p.inputValue('input[type=search]')) === 'Get-MgUser', 'the suggestion searches the name alone');
+      // A pipeline pasted without spaces offers its first cmdlet, not the whole run.
+      await p.goto(`${BASE}/?q=${encodeURIComponent('Get-MgUser|Select-Object Id')}`);
+      await p.waitForSelector('.empty .chip');
+      check((await p.textContent('.empty .chip')) === 'Search Get-MgUser', 'a pipeline without spaces offers its first cmdlet name', await p.textContent('.empty .chip'));
+      await p.goto(`${BASE}/?q=${encodeURIComponent('Get-MgUser|Select-Object')}`);
+      await p.waitForSelector('.empty .chip');
+      check((await p.textContent('.empty .chip')) === 'Search Get-MgUser', 'a bare pipeline offers its first cmdlet name', await p.textContent('.empty .chip'));
       await p.goto(`${BASE}/?s=mecm&q=Get-MgUser`);
       await p.waitForSelector('.empty .chip');
       const chips = await p.locator('.empty .chip').allTextContents();
@@ -751,6 +774,22 @@ const scenarios = [
       await p.goto(`${BASE}/?s=mecm&q=xyzq`);
       await p.waitForSelector('.empty .chip');
       check(!(await p.locator('.empty p:not(.empty-title)').count()), 'a single plain word gets no hint');
+      // A long pasted name wraps inside the pane: neither the title nor its suggestion runs past it.
+      for (const [w, h, name] of [[390, 844, 'Get-MgBetaDeviceManagementWindowsAutopilotDeploymentProfileAssignedDevice'], [1440, 900, 'Get-MgBetaIdentityGovernanceLifecycleWorkflowRunSubjectProcessingResultTaskProcessingResultSubjectServiceProvisioningError -Foo x']]) {
+        await p.setViewportSize({ width: w, height: h });
+        await p.goto(`${BASE}/?s=mecm&q=${encodeURIComponent(name)}`);
+        await p.waitForSelector('.empty .chip');
+        const laid = await p.evaluate(() => {
+          const pane = document.getElementById('results');
+          const right = pane.getBoundingClientRect().right;
+          return {
+            pane: right,
+            overflow: pane.scrollWidth - pane.clientWidth,
+            out: [...document.querySelectorAll('.empty, .empty-title, .empty .chip')].map((el) => Math.round(el.getBoundingClientRect().right - right)).filter((d) => d > 0),
+          };
+        });
+        check(laid.overflow <= 0 && !laid.out.length, `a long query's empty state fits its pane at ${w}px`, JSON.stringify(laid));
+      }
       // With zero results the combobox has no popup.
       const aria = await p.evaluate(() => { const i = document.querySelector('input[type=search]'); return [i.getAttribute('aria-expanded'), i.getAttribute('aria-controls')]; });
       check(aria[0] === 'false' && aria[1] === null, 'no results: the combobox is collapsed', aria.join());
@@ -1081,7 +1120,10 @@ async function runScenario(browser, sc) {
   try {
     browser = await chromium.launch();
     const only = process.argv[2];
-    for (const sc of scenarios.filter((s) => !only || s.name.includes(only))) await runScenario(browser, sc);
+    const chosen = scenarios.filter((s) => !only || s.name.includes(only));
+    // A misspelled filter must not pass green with nothing run.
+    if (!chosen.length) check(false, 'harness', `no scenario name contains "${only}"`);
+    for (const sc of chosen) await runScenario(browser, sc);
   } catch (e) {
     check(false, 'harness', e.message);
   } finally {

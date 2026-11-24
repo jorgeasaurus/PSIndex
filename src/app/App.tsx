@@ -100,7 +100,6 @@ function Search() {
   // (Enter) already sees it as the latest, not a passive effect still waiting for the next frame.
   // A newer search also gives up an Enter pressed for the previous one.
   useLayoutEffect(() => { client.search(q, filters); setSel(settle); }, [q, filters]);
-  // A facet value from a link in another case (?verb=get) takes the facet's spelling.
   const open = !sel ? null : 'row' in sel ? sel.row : 'enter' in sel ? sel.shown : null;
   const link = sel && 'link' in sel ? sel.link : '';
   const enterFor = sel && 'enter' in sel ? sel.enter : null;

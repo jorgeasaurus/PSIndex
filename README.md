@@ -38,27 +38,27 @@ dist/                 static site, plus a /mcp function, deployed by Vercel on e
 
 Agents can query this index over the [Model Context Protocol](https://modelcontextprotocol.io) Streamable HTTP transport at `https://psindex.vercel.app/mcp`. The endpoint is stateless and read-only, and it does not require authentication. `search_cmdlets` returns names, modules, short descriptions, and page URLs; `get_cmdlet` returns the syntax, parameters, and the rest of an entry; `list_modules` lists modules.
 
-Each client spells the config differently:
+Each client spells the config differently (the site's info panel gives the same setups):
 
-- **VS Code**, `.vscode/mcp.json` (top-level key `servers`):
-
-  ```json
-  { "servers": { "psindex": { "type": "http", "url": "https://psindex.vercel.app/mcp" } } }
-  ```
-
-- **Claude Code**, `.mcp.json` in the project (top-level key `mcpServers`), or `claude mcp add --transport http psindex https://psindex.vercel.app/mcp`:
-
-  ```json
-  { "mcpServers": { "psindex": { "type": "http", "url": "https://psindex.vercel.app/mcp" } } }
-  ```
-
-- **Cursor**, `.cursor/mcp.json` or `~/.cursor/mcp.json` (top-level key `mcpServers`, no `type`):
+- **Cursor**, `~/.cursor/mcp.json` or `.cursor/mcp.json` (top-level key `mcpServers`, no `type`):
 
   ```json
   { "mcpServers": { "psindex": { "url": "https://psindex.vercel.app/mcp" } } }
   ```
 
-- **Claude Desktop and claude.ai** take a remote server as a custom connector (Settings → Connectors → Add custom connector, with the URL above), not as an entry in `claude_desktop_config.json`.
+- **VS Code**, `.mcp.json` at the workspace root, or `~/.copilot/mcp-config.json` for every workspace (top-level key `mcpServers`, `type` `http`). `.vscode/mcp.json` with a `servers` key is the deprecated Local harness format, which the Copilot harness does not read:
+
+  ```json
+  { "mcpServers": { "psindex": { "type": "http", "url": "https://psindex.vercel.app/mcp" } } }
+  ```
+
+- **Claude Code**, `.mcp.json` in the project (top-level key `mcpServers`, `type` `http`; an entry without `type` is read as stdio), or `claude mcp add --transport http psindex https://psindex.vercel.app/mcp`:
+
+  ```json
+  { "mcpServers": { "psindex": { "type": "http", "url": "https://psindex.vercel.app/mcp" } } }
+  ```
+
+- **Claude Desktop and claude.ai** take a remote server as a custom connector (Customize → Connectors → Add custom connector, with the URL above and no sign-in). `claude_desktop_config.json` holds local servers only.
 
 ## Develop
 

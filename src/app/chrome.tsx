@@ -4,7 +4,7 @@ import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { McpPanel } from './mcp-panel';
-import { ALL, SOURCES, SOURCE_NAMES, TOTAL, formatCount, formatList, isVerbNoun, queryWords, sourceOf, srcStyle } from './sources';
+import { ALL, SOURCES, SOURCE_NAMES, TOTAL, cmdletNameIn, formatCount, formatList, queryWords, sourceOf, srcStyle } from './sources';
 import type { Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
@@ -231,7 +231,7 @@ function Select({ label, value, options, onChange }: { label: string; value: str
 
 /**
  * No results. `q` is the query ('' when it has no token). The hint comes from what was typed: a
- * command line pasted with its parameters offers its cmdlet name alone, a lone cmdlet name its
+ * command line pasted with its parameters or a pipeline offers its cmdlet name alone, a lone cmdlet name its
  * noun, several words fewer. No `onClearFilters`/`onSearchAll`: no filters are set, or the scope
  * is already every source.
  */
@@ -246,12 +246,12 @@ export function EmptyState({ q, inLabel, descriptionsLoading, onSearch, onClearF
   // Descriptions load after names; until then a query that only a description matches finds nothing yet.
   if (q && descriptionsLoading) return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
   const words = queryWords(q);
-  const name = words.find(isVerbNoun);
+  const name = cmdletNameIn(words);
   const suggest = (text: string) => <button type="button" class="chip" onClick={() => onSearch(text)}>Search <code>{text}</code></button>;
   return (
     <div class="empty">
       <p class="empty-title">{q ? <>No match for “{q}”{inLabel}.</> : 'Nothing matches these filters.'}</p>
-      {name && words.length > 1 ? <><p>Parameters and values aren’t part of a cmdlet name. Search the name alone:</p>{suggest(name)}</>
+      {name && name !== words.join(' ') ? <><p>A search matches cmdlet names, not whole command lines. Search the cmdlet name alone:</p>{suggest(name)}</>
         : name ? <><p>Try the noun alone:</p>{suggest(name.slice(name.indexOf('-') + 1))}</>
         : words.length > 1 && <p>Try fewer words.</p>}
       {onClearFilters && <button type="button" class="chip" onClick={onClearFilters}>Clear filters</button>}

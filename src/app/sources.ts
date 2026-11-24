@@ -75,8 +75,13 @@ export const queryTokens = (q: string) => queryWords(q).map((w) => w.toLowerCase
 /** The text of a query that searches something: trimmed, or '' when it has no token ("", "--"). */
 export const searchText = (q: string) => (queryWords(q).length ? q.trim() : '');
 
-/** A word shaped like a cmdlet name ("Get-MgUser"): letters, a hyphen, then the noun. */
-export const isVerbNoun = (w: string) => /^[a-z]+-[a-z0-9]/i.test(w);
+/**
+ * The first word shaped like a cmdlet name ("Get-MgUser": letters, a hyphen, then the noun), or
+ * undefined. Words are split where PowerShell ends a command, so a pipeline pasted without spaces
+ * ('Get-MgUser|Select-Object') yields its first cmdlet, never the whole run.
+ */
+export const cmdletNameIn = (words: string[]) =>
+  words.flatMap((w) => w.split(/[|;&(){}]/)).find((w) => /^[a-z]+-[a-z0-9]+$/i.test(w));
 
 /**
  * Where a token matches a lower-cased cmdlet name with every hyphen ignored ("getmguser" in
