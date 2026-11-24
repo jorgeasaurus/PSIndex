@@ -88,7 +88,10 @@ export interface Descriptions { loading: boolean; failed: SourceId[] }
 /** One search's answer; `id` is the search's, so a re-run of the same search keeps it. */
 export interface Results {
   id: number;
+  /** The query and source these results are for. The empty state words itself from them, not from
+   *  what is typed now, so a newer search still running never pairs with an older count. */
   q: string;
+  source: SourceId;
   refs: Int32Array;
   facets: Facets;
   /** Matches of the query that the filters hide, counted only when they hide every one (else 0). */

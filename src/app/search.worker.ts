@@ -48,7 +48,7 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   // When the filters leave nothing, say whether they are why: the query may match the cmdlet they hide.
   const bare = { ...EMPTY_FILTERS, source: filters.source };
   const hidden = !hits.length && searchText(q) && !sameFilters(filters, bare) ? searchHits(all, q, bare, { literal: true }).length : 0;
-  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), hidden, ms: performance.now() - t0, descriptions: descriptionsOf(scope) }, [refs.buffer]);
+  post({ type: 'results', id, q, source: filters.source, refs, facets: facetsFor(scope, perSourceFacets), hidden, ms: performance.now() - t0, descriptions: descriptionsOf(scope) }, [refs.buffer]);
 }
 
 /** One handler per request; the compiler checks each reply against Requests in types.ts. */

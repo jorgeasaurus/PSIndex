@@ -352,9 +352,9 @@ function Search() {
             query={q}
             empty={
               <EmptyState
-                q={searchText(q)}
+                q={searchText(results?.q ?? '')}
                 descriptionsLoading={results?.descriptions.loading ?? true}
-                inLabel={scope.inLabel}
+                inLabel={scopeOf(results?.source ?? filters.source).inLabel}
                 hidden={results?.hidden ?? 0}
                 onSearch={searchFor}
                 // Clearing the filters keeps the source the user picked; leaving it is a separate choice.
