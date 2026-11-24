@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Parse Microsoft Entra PowerShell documentation markdown files into JSON.
 
-Reads cmdlet docs from a local clone of MicrosoftDocs/entra-powershell-docs
+Reads cmdlet docs from a local clone of microsoftgraph/entra-powershell
+(module/docs/entra-powershell-v1.0 and module/docs/entra-powershell-beta)
 and produces:
   - $PSINDEX_OUT/manifest.json   (lightweight summary for all cmdlets)
   - $PSINDEX_OUT/modules/*.json  (per-module detail, loaded lazily)
@@ -10,7 +11,7 @@ Usage:
     bash pipelines/refresh.sh entra   (writes data/entra/ via $PSINDEX_OUT)
 
 docs_dir defaults to ./docs and should point to the directory containing
-v1.0/ and beta/ subdirectories.
+entra-powershell-v1.0/ and entra-powershell-beta/ subdirectories.
 """
 
 import json
@@ -180,6 +181,16 @@ def parse_cmdlet_file(filepath, module_name, api_version):
     if not is_cmdlet:
         return None
 
+    # The module repo groups files by short folder names (Groups, Users). The
+    # PowerShell module id is the platyPS "Module Name" field. Folders in the
+    # old docs repo were already named that way, so a missing field still works.
+    named = meta.get("module name", "").strip().strip("'\"")
+    if named:
+        module_name = named
+    elif not module_name.startswith("Microsoft.Entra"):
+        prefix = "Microsoft.Entra.Beta." if api_version == "beta" else "Microsoft.Entra."
+        module_name = prefix + module_name
+
     cmdlet_name = meta.get("title", filepath.stem)
 
     # SYNOPSIS -> description
@@ -269,10 +280,19 @@ def fetch_all_module_versions(module_names: list) -> dict:
 
 
 def scan_version_dir(version_dir: Path, api_version: str) -> list:
-    """Scan all module directories under a version directory."""
+    """Scan cmdlet markdown under a version directory.
+
+    The module repo also keeps a few Microsoft.Entra / Microsoft.Entra.Beta
+    cmdlets as loose files next to the module folders.
+    """
     results = []
     if not version_dir.is_dir():
         return results
+    root_module = "Microsoft.Entra.Beta" if api_version == "beta" else "Microsoft.Entra"
+    for md_file in sorted(version_dir.glob("*.md")):
+        cmdlet = parse_cmdlet_file(md_file, root_module, api_version)
+        if cmdlet:
+            results.append(cmdlet)
     for module_dir in sorted(version_dir.iterdir()):
         if not module_dir.is_dir():
             continue
@@ -295,9 +315,9 @@ def main():
     modules_dir = data_dir / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    # Scan v1.0 and beta
-    v1_dir = docs_dir / "v1.0"
-    beta_dir = docs_dir / "beta"
+    # Scan v1.0 and beta. Directory names follow the module repo.
+    v1_dir = docs_dir / "entra-powershell-v1.0"
+    beta_dir = docs_dir / "entra-powershell-beta"
 
     print(f"Scanning {v1_dir} ...")
     v1_cmdlets = scan_version_dir(v1_dir, "v1.0")
