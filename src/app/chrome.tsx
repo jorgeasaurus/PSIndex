@@ -4,7 +4,7 @@ import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { McpPanel } from './mcp-panel';
-import { ALL, SOURCES, SOURCE_LABELS, SOURCE_NAMES, TOTAL, cmdletNameIn, formatCount, formatList, queryWords, sourceOf, srcStyle } from './sources';
+import { ALL, SOURCES, SOURCE_NAMES, TOTAL, cmdletNameIn, formatCount, formatList, queryWords, sourceOf, srcStyle } from './sources';
 import type { Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
@@ -302,7 +302,7 @@ export function Intro({ onPick, compact }: { onPick?: (s: SourceId, q: string) =
     <div class={'intro' + (compact ? ' intro-compact' : '')}>
       <h2>Look up any Microsoft PowerShell cmdlet.</h2>
       <p class="intro-lede">
-        PSIndex searches {formatCount(TOTAL)} cmdlets from {compact ? SOURCE_NAMES : SOURCE_LABELS} in one place, with each one’s
+        PSIndex searches {formatCount(TOTAL)} cmdlets from {SOURCE_NAMES} in one place, with each one’s
         syntax, parameters, examples and required permissions from the Microsoft docs. Type part of a name or what you want to
         do, then pick a result.{compact ? null : ' It all runs in your browser.'}
       </p>

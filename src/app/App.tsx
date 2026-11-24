@@ -329,8 +329,9 @@ function Search() {
       }
       toolbar={
         <>
-          {/* Narrow screens have no detail pane until an entry opens: the intro leads the results instead. */}
-          {narrow && !open && !searchText(q) && <Intro compact onPick={pickSample} />}
+          {/* Narrow screens have no detail pane until an entry opens: the intro leads the results instead,
+              but not while a deep link is still being looked up (that entry is about to open). */}
+          {narrow && !open && !link && !searchText(q) && <Intro compact onPick={pickSample} />}
           <Toolbar label={countLabel} timing={timing} filterCount={filterCount} showFilters={showFilters} onToggleFilters={loadError ? undefined : () => setShowFilters((s) => !s)} />
           {/* Above the results, so it shows at every width (narrow screens hide the detail pane). */}
           {missing && (

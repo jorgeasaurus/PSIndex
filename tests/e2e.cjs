@@ -62,6 +62,18 @@ const scenarios = [
     },
   },
   {
+    name: 'no intro over a deep link still loading',
+    context: { viewport: { width: 390, height: 844 } },
+    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
+    async run(p) {
+      await p.goto(`${BASE}/?c=graph:Get-MgUser`);
+      await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+      check(!(await p.locator('.intro-compact').count()), 'a pending deep link shows no intro or sample searches');
+      this.release();
+      await titleIs(p, 'Get-MgUser');
+    },
+  },
+  {
     name: 'a pasted command line searches its cmdlet',
     async run(p) {
       await p.goto(BASE);
