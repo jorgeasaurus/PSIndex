@@ -6,7 +6,7 @@ One searchable reference for the PowerShell cmdlets an M365 / endpoint admin act
 |---|---|---|
 | Microsoft Graph (`Microsoft.Graph.*`, v1.0 + beta) | ~27,300 | [microsoftgraph-docs-powershell](https://github.com/MicrosoftDocs/microsoftgraph-docs-powershell) |
 | Azure (`Az.*`) | ~8,800 | [azure-docs-powershell](https://github.com/MicrosoftDocs/azure-docs-powershell) |
-| Microsoft Entra (`Microsoft.Entra.*`) | ~600 | [entra-powershell-docs](https://github.com/MicrosoftDocs/entra-powershell-docs) |
+| Microsoft Entra (`Microsoft.Entra.*`) | ~600 | [entra-powershell](https://github.com/microsoftgraph/entra-powershell) |
 | Exchange, Teams, SharePoint, Skype, Whiteboard | ~3,000 | [office-docs-powershell](https://github.com/MicrosoftDocs/office-docs-powershell) |
 | Configuration Manager (MECM) | ~1,200 | [sccm-docs-powershell-ref](https://github.com/MicrosoftDocs/sccm-docs-powershell-ref) |
 
