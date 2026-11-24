@@ -60,12 +60,16 @@ const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) 
 
 /** The detail shape the app reads: every field present, so the UI never guesses. */
 /**
- * Prose from the docs as the reader should see it: escape sequences the docs left as literal text
- * ("\\r", "\\n") become spaces, whitespace collapses, and template placeholders ("{{ Fill in the
- * Synopsis }}") or stray markdown headings ("## SYNTAX") count as no text at all.
+ * Prose from the docs as the reader should see it: line breaks the docs left as literal text
+ * ("list:\\r- item") become spaces, whitespace collapses, and template placeholders ("{{ Fill in
+ * the Synopsis }}") or stray markdown headings ("## SYNTAX") count as no text at all. A word that
+ * is a Windows or UNC path ("C:\\reports", "\\\\server\\new") keeps its backslashes.
  */
 function cleanText(s: string): string {
-  const t = s.replace(/\\[rnt]/g, ' ').replace(/\s+/g, ' ').trim();
+  const t = s
+    .replace(/\S*\\[rn]\S*/g, (word) => (/(?:^|[^A-Za-z])[A-Za-z]:\\[\w.$]{2}|^\\\\/.test(word) ? word : word.replace(/\\[rn]/g, ' ')))
+    .replace(/\s+/g, ' ')
+    .trim();
   return /^\{\{.*\}\}$/.test(t) || /^#+\s/.test(t) ? '' : t;
 }
 
@@ -234,9 +238,11 @@ async function main() {
   const total = sources.reduce((a, s) => a + s.count, 0);
   // The id is bundled into the page and the worker, which fetch only /a/<build>/… (sources.ts assetUrl).
   const build = hash.digest('hex').slice(0, 12);
-  // Swap in: drop every other build (this one may already exist: unchanged data, same hash).
-  for (const old of await readdir(OUT)) if (old !== '.staging') await rm(join(OUT, old), { recursive: true, force: true });
-  await rename(STAGE, join(OUT, build));
+  // Put the new build in place first, then drop the others: at no point is there no usable build.
+  // (Unchanged data hashes the same, so this build may already be there.)
+  if (existsSync(join(OUT, build))) await rm(STAGE, { recursive: true, force: true });
+  else await rename(STAGE, join(OUT, build));
+  for (const old of await readdir(OUT)) if (old !== build) await rm(join(OUT, old), { recursive: true, force: true });
   await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ build, total, sources }, null, 2) + '\n');
   console.log(`  ${total} cmdlets indexed in ${Date.now() - t0} ms`);
 }

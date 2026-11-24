@@ -131,10 +131,12 @@ def syntax_from(section):
     """Every parameter set in a SYNTAX section: the docs give one fenced code block per set.
 
     The sets are joined by a blank line; the site splits them again at each line starting with
-    the cmdlet name.
+    the cmdlet name. Comment lines ("# ParameterSetName") are dropped.
     """
-    blocks = [b.strip() for b in re.findall(r"```[^\n]*\n(.*?)```", section, re.DOTALL)]
-    return "\n\n".join(b for b in blocks if b)
+    blocks = re.findall(r"```[^\n]*\n(.*?)```", section, re.DOTALL)
+    # Some docs label a set with a "# ..." comment line; the set itself starts at the cmdlet name.
+    sets = ["\n".join(l for l in b.splitlines() if not l.lstrip().startswith("#")).strip() for b in blocks]
+    return "\n\n".join(s for s in sets if s)
 
 
 def require_cmdlets(source_id, count):
