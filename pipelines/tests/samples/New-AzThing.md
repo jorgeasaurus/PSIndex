@@ -11,8 +11,15 @@ Creates a thing.
 
 ## SYNTAX
 
+### ByName (Default)
 ```
 New-AzThing -Name <String> [-DefaultProfile <IAzureContextContainer>]
+```
+
+### ByInputObject
+```
+# ParameterSetName: ByInputObject
+New-AzThing -InputObject <PSThing> [-DefaultProfile <IAzureContextContainer>]
 ```
 
 ## EXAMPLES

@@ -185,8 +185,8 @@ def syntax_from(section):
 # Info strings the docs use for PowerShell; an unlabelled block is code too. "Output", "json",
 # "yaml" and other blocks are skipped.
 POWERSHELL_LANGS = {"", "powershell", "pwsh", "ps", "ps1", "posh"}
-# A console prompt ("PS C:\>", "PS /home/user>") is not part of the command to copy.
-PROMPT_RE = re.compile(r"^PS [^>\n]*>[ \t]*", re.MULTILINE)
+# A console prompt ("PS>", "PS C:\>", "PS /home/user>") is not part of the command to copy.
+PROMPT_RE = re.compile(r"^PS(?:[ \t][^>\n]*)?>[ \t]*", re.MULTILINE)
 # How many examples a cmdlet keeps; the detail pane shows them all.
 MAX_EXAMPLES = 3
 

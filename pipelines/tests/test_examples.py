@@ -3,7 +3,9 @@
 Run with: python3 -m unittest discover -s pipelines/tests
 """
 import importlib.util
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,7 +13,7 @@ PIPELINES = Path(__file__).resolve().parent.parent
 SAMPLES = Path(__file__).resolve().parent / "samples"
 sys.path.insert(0, str(PIPELINES))
 
-from common import examples_from  # noqa: E402
+from common import examples_from, syntax_from  # noqa: E402
 
 
 def parser(source):
@@ -22,11 +24,23 @@ def parser(source):
     return module
 
 
+# Both samples hold more PowerShell examples than the default limit of 3, so a parser that
+# loses its limit, or slices or drops examples, changes its result.
 AZ_EXAMPLES = [
     'New-AzThing -Name "one"',
     '<#\nSettings for the thing:\n[ { "name": "two" } ]\n#>\n# set the resource group\n$rg = "x"\nNew-AzThing -Name "two" # inline note',
     'New-AzThing -Name "four"',
 ]
+AZ_SYNTAX = (
+    "New-AzThing -Name <String> [-DefaultProfile <IAzureContextContainer>]\n\n"
+    "New-AzThing -InputObject <PSThing> [-DefaultProfile <IAzureContextContainer>]"
+)
+ENTRA_EXAMPLES = [
+    "Connect-Entra -Scopes 'User.Read.All'\nGet-EntraThing -Top 3",
+    "Get-EntraThing -ThingId 'x'",
+    "Get-EntraThing -ThingId 'y'",
+]
+ENTRA_SYNTAX = "Get-EntraThing [-Top <Int32>] [<CommonParameters>]\n\nGet-EntraThing -ThingId <String> [<CommonParameters>]"
 
 
 class ExamplesFrom(unittest.TestCase):
@@ -46,37 +60,55 @@ class ExamplesFrom(unittest.TestCase):
         section = '````powershell\n$md = @"\n```\n"@\n````\n'
         self.assertEqual(examples_from(section), ['$md = @"\n```\n"@'])
 
-    def test_limit(self):
+    def test_default_limit_is_three(self):
         section = "".join(f"```\nGet-X{i}\n```\n" for i in range(5))
-        self.assertEqual(examples_from(section, 3), ["Get-X0", "Get-X1", "Get-X2"])
+        self.assertEqual(examples_from(section), ["Get-X0", "Get-X1", "Get-X2"])
+
+    def test_prompts_removed(self):
+        section = "```\nPS> Get-A\nPS>Get-B\nPS C:\\> Get-C\nPS /home/user> Get-D\nPSObject> kept\n```\n"
+        self.assertEqual(examples_from(section), ["Get-A\nGet-B\nGet-C\nGet-D\nPSObject> kept"])
+
+
+class SyntaxFrom(unittest.TestCase):
+    def test_every_parameter_set_without_comments(self):
+        section = "### A\n```\nGet-X -A\n```\n\n### B\n```\n# ParameterSetName: B\nGet-X -B\n```\n\n### C\n```\nGet-X -C\n```\n"
+        self.assertEqual(syntax_from(section), "Get-X -A\n\nGet-X -B\n\nGet-X -C")
 
 
 class Parsers(unittest.TestCase):
     def test_az(self):
         result = parser("az").parse_cmdlet_doc(SAMPLES / "New-AzThing.md")
         self.assertEqual(result["examples"], AZ_EXAMPLES)
+        self.assertEqual(result["syntax"], AZ_SYNTAX)
 
     def test_exchange(self):
         result = parser("exchange").parse_cmdlet_doc(SAMPLES / "New-AzThing.md", "Exchange", "ExchangePowerShell")
         self.assertEqual(result["examples"], AZ_EXAMPLES)
+        self.assertEqual(result["syntax"], AZ_SYNTAX)
         self.assertEqual(result["module"], "Az.Test")
 
     def test_exchange_module_without_front_matter_is_the_module_directory(self):
         result = parser("exchange").parse_cmdlet_doc(SAMPLES / "Get-EntraThing.md", "Skype for Business", "SkypeForBusiness")
         self.assertEqual(result["module"], "SkypeForBusiness")
 
-    def test_entra_and_graph(self):
-        expected = ["Connect-Entra -Scopes 'User.Read.All'\nGet-EntraThing -Top 3", "Get-EntraThing -ThingId 'x'"]
+    def test_entra(self):
         result = parser("entra").parse_cmdlet_file(SAMPLES / "Get-EntraThing.md", "Microsoft.Entra.Users", "v1.0")
-        self.assertEqual(result["examples"], expected)
-        graph = parser("graph")
-        section = graph.extract_section((SAMPLES / "Get-EntraThing.md").read_text(encoding="utf-8"), "EXAMPLES")
-        self.assertEqual(examples_from(section), expected)
+        self.assertEqual(result["examples"], ENTRA_EXAMPLES)
+        self.assertEqual(result["syntax"], ENTRA_SYNTAX)
+
+    def test_graph(self):
+        result = parser("graph").parse_cmdlet_file(SAMPLES / "Get-EntraThing.md", "Microsoft.Graph.Users", "v1.0")
+        self.assertEqual(result["examples"], ENTRA_EXAMPLES)
+        self.assertEqual(result["syntax"], ENTRA_SYNTAX)
 
     def test_mecm_has_no_limit(self):
-        mecm = parser("mecm")
-        _, body = mecm.parse_front_matter((SAMPLES / "New-AzThing.md").read_text(encoding="utf-8"))
-        self.assertEqual(examples_from(mecm.parse_section(body, "EXAMPLES"), limit=None), AZ_EXAMPLES + ['New-AzThing -Name "five"'])
+        # MECM takes the cmdlet name from the file name, so the Az sample is read as New-CMThing.md.
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "New-CMThing.md"
+            shutil.copyfile(SAMPLES / "New-AzThing.md", doc)
+            result = parser("mecm").parse_cmdlet_file(doc)
+        self.assertEqual(result["examples"], AZ_EXAMPLES + ['New-AzThing -Name "five"'])
+        self.assertEqual(result["syntax"], AZ_SYNTAX)
 
 
 if __name__ == "__main__":
