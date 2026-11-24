@@ -147,6 +147,21 @@ def gallery_dependencies(package, version, source_id):
     return previous_module_versions(source_id)
 
 
+# Emphasis markup around a run of text: *a*, **a**, _a_, __a__ and `code`. A '_' or '*' inside a
+# word, between spaces or escaped ("Standard_AzureFrontDoor", "2 * 3", "Standard\_Azure") is text.
+EMPHASIS_RE = re.compile(r"(?<![\w*\\])(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=[^\s\\])\1(?![\w*])|`([^`]+)`")
+LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+ESCAPE_RE = re.compile(r"\\([\\`*_\[\]])")
+
+
+def clean_synopsis(line):
+    """A SYNOPSIS line as plain text: links become their text, emphasis loses its markup and
+    markdown escapes ("Standard\\_AzureFrontDoor") their backslash."""
+    line = LINK_RE.sub(r"\1", line)
+    line = EMPHASIS_RE.sub(lambda m: m.group(2) if m.group(3) is None else m.group(3), line)
+    return ESCAPE_RE.sub(r"\1", line).strip()
+
+
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})\s*([^\s`]*)")
 
 
@@ -155,7 +170,8 @@ def fenced_blocks(section):
 
     Fences are read line by line, so a closing fence is never taken for an opening one, and a
     block ends only at a fence of its own character at least as long as the one that opened it.
-    The language is the info string, lower-cased ('' for an unlabelled block).
+    The language is the info string, lower-cased ('' for an unlabelled block). A block still
+    open when the section ends runs to its end, as CommonMark runs it to the end of its container.
     """
     fence = lang = None
     body = []
@@ -170,6 +186,8 @@ def fenced_blocks(section):
             fence = None
             continue
         body.append(line)
+    if fence is not None:
+        yield lang, "\n".join(body)
 
 
 def syntax_from(section):

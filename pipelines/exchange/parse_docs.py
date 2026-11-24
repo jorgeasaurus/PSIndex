@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
+from common import clean_synopsis, examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -29,13 +29,15 @@ WORKLOAD_DIRS = [
 ]
 
 # -- Exchange noun-based sub-category mapping --------------------------------
+# The first pattern that matches the noun wins, so Client Access precedes the generic Mailbox
+# pattern its CASMailbox, OwaMailboxPolicy and ActiveSyncMailboxPolicy nouns also match.
 EXCHANGE_CATEGORY_MAP = [
+    (r'CASMailbox|OwaMailboxPolicy|ActiveSync', 'Client Access'),
     (r'Mailbox', 'Mailbox Management'),
     (r'TransportRule|TransportConfig', 'Transport Rules'),
     (r'DlpCompliance', 'Data Loss Prevention'),
     (r'RetentionPolicy|RetentionCompliance', 'Retention & Compliance'),
     (r'AntiPhish|AntiSpam|MalwareFilter|SafeAttachment|SafeLinks', 'Threat Protection'),
-    (r'CASMailbox|OwaMailboxPolicy|ActiveSync', 'Client Access'),
     (r'DistributionGroup|UnifiedGroup|DynamicDistributionGroup', 'Groups & Distribution'),
     (r'OrganizationConfig|AcceptedDomain|RemoteDomain|FederatedOrganization', 'Organization'),
     (r'MoveRequest|MigrationBatch|MigrationEndpoint|MigrationUser', 'Migration'),
@@ -113,10 +115,7 @@ def parse_cmdlet_doc(filepath, workload_name, default_module):
         category = workload_name
 
     synopsis_sec = extract_section(text, 'SYNOPSIS')
-    description = synopsis_sec.splitlines()[0].strip() if synopsis_sec else ''
-    # Clean up markdown
-    description = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', description)
-    description = re.sub(r'[*_`]', '', description).strip()
+    description = clean_synopsis(synopsis_sec.splitlines()[0]) if synopsis_sec else ''
 
     syntax_sec = extract_section(text, 'SYNTAX')
     syntax = syntax_from(syntax_sec)

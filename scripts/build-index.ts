@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { join, basename, dirname, relative } from 'node:path';
 import { existsSync } from 'node:fs';
 import { artifactPath } from '../src/app/artifacts.ts';
+import { cleanText } from './clean-text.ts';
 import type { CmdletDetail, CmdletFile, DocumentedParam, IndexShard, SourceMeta } from '../src/app/types.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -66,21 +67,6 @@ const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) =
 const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) =>
   isObject(x) && typeof x.name === 'string' && typeof x.type === 'string' && typeof x.required === 'boolean' && (x.description === undefined || typeof x.description === 'string'));
 
-/**
- * Prose from the docs as the reader should see it: line breaks the docs left as literal text
- * ("list:\\r- item") become spaces, whitespace collapses, HTML comments ("<!-- 10519922 -->") go,
- * and text that is only template placeholders ("{{ Fill in the Synopsis }}") or a stray markdown
- * heading ("## SYNTAX") counts as no text at all. A word that is a Windows or UNC path
- * ("C:\\reports", "\\\\server\\new") keeps its backslashes.
- */
-function cleanText(s: string): string {
-  const t = s
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/\S*\\[rn]\S*/g, (word) => (/(?:^|[^A-Za-z])[A-Za-z]:\\[\w.$]{2}|^\\\\/.test(word) ? word : word.replace(/\\[rn]/g, ' ')))
-    .replace(/\s+/g, ' ')
-    .trim();
-  return /^(?:\{\{[^}]*\}\}\s*)+$/.test(t) || /^#+\s/.test(t) ? '' : t;
-}
 
 /** An example that is only the docs template's placeholder ("PS C:\\> {{ Add example code here }}") is no example. */
 const isPlaceholder = (x: string) => /^\{\{[\s\S]*\}\}$/.test(x.replace(/^PS [^>\n]*>\s*/gm, '').trim());

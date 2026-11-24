@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import examples_from, gallery_dependencies, gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
+from common import clean_synopsis, examples_from, gallery_dependencies, gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
 
 # ── Category mapping ──────────────────────────────────────────────────────────
 CATEGORY_MAP = [
@@ -134,10 +134,7 @@ def parse_cmdlet_doc(filepath):
         return None
 
     synopsis_sec = extract_section(text, 'SYNOPSIS')
-    description = synopsis_sec.splitlines()[0].strip() if synopsis_sec else ''
-    # Clean up markdown
-    description = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', description)
-    description = re.sub(r'[*_`]', '', description).strip()
+    description = clean_synopsis(synopsis_sec.splitlines()[0]) if synopsis_sec else ''
 
     syntax_sec = extract_section(text, 'SYNTAX')
     syntax = syntax_from(syntax_sec)

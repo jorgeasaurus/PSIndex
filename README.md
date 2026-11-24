@@ -73,10 +73,11 @@ npm run typecheck  # tsc (run after build or index, which generates src/sources.
 npm run test:e2e   # browser checks against the built site (needs Playwright + Chromium)
 npm run test:mcp   # HTTP checks for /mcp against the built server
 npm run test:pipelines  # unit tests for the docs parsers (Python 3, standard library only)
-npm run verify     # the gate CI runs: build, typecheck, playwright install, browser checks, MCP checks, pipeline tests
+npm run test:clean-text # the index build's text cleaning (literal escapes, Windows and UNC paths)
+npm run verify     # the gate CI runs: build, typecheck, playwright install, browser checks, MCP checks, pipeline and text-cleaning tests
 ```
 
-`npm run verify` runs `playwright install --with-deps chromium`, which downloads Chromium and installs its system libraries with the OS package manager (apt, through sudo on a developer machine). Where those libraries are already present, run `npm run build && npm run typecheck && npm run test:e2e && npm run test:mcp && npm run test:pipelines` instead.
+`npm run verify` runs `playwright install --with-deps chromium`, which downloads Chromium and installs its system libraries with the OS package manager (apt, through sudo on a developer machine). Where those libraries are already present, run `npm run build && npm run typecheck && npm run test:e2e && npm run test:mcp && npm run test:pipelines && npm run test:clean-text` instead.
 
 ## Refresh data locally
 
