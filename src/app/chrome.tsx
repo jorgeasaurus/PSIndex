@@ -4,7 +4,7 @@ import type { ComponentChildren, Ref } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { Search as SearchIcon, X, Sun, Moon, SlidersHorizontal } from 'lucide-preact';
 import { McpPanel } from './mcp-panel';
-import { ALL, SOURCES, SOURCE_NAMES, TOTAL, cmdletNameIn, formatCount, formatList, queryWords, sourceOf, srcStyle } from './sources';
+import { ALL, SOURCES, SOURCE_LABELS, SOURCE_NAMES, TOTAL, cmdletNameIn, formatCount, formatList, queryWords, sourceOf, srcStyle } from './sources';
 import type { Facets, Filters, SourceId } from './types';
 
 /** Page layout: band, results pane, detail pane, over the background canvas. */
@@ -293,13 +293,20 @@ export function LoadFailed({ message }: { message: string }) {
  * No `onPick` (the shell, a failed load): the example searches can't run, so they aren't offered,
  * and neither is the key legend (no key acts on a search that can't run).
  */
-export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void }) {
+/**
+ * What the site is for, shown until there is something to look at: in the detail pane on wide
+ * screens, and `compact` above the results on narrow ones (no sources table or key legend there).
+ */
+export function Intro({ onPick, compact }: { onPick?: (s: SourceId, q: string) => void; compact?: boolean }) {
   return (
-    <div class="intro">
-      <h2>Type a fragment. Get the command.</h2>
+    <div class={'intro' + (compact ? ' intro-compact' : '')}>
+      <h2>Look up any Microsoft PowerShell cmdlet.</h2>
       <p class="intro-lede">
-        {formatCount(TOTAL)} cmdlets from {SOURCES.length} Microsoft docs sets, searched in your browser. Pick a result for its syntax, parameters, examples and permissions.
+        PSIndex searches {formatCount(TOTAL)} cmdlets from {compact ? SOURCE_NAMES : SOURCE_LABELS} in one place, with each one’s
+        syntax, parameters, examples and required permissions from the Microsoft docs. Type part of a name or what you want to
+        do, then pick a result.{compact ? null : ' It all runs in your browser.'}
       </p>
+      {onPick && <p class="intro-try">Try:</p>}
       {onPick && <ul class="intro-samples" aria-label="Example searches">
         {SOURCES.map((s) => (
           <li key={s.id}>
@@ -309,15 +316,15 @@ export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void })
           </li>
         ))}
       </ul>}
-      <dl class="intro-sources">
+      {!compact && <dl class="intro-sources">
         {SOURCES.map((s) => (
           <div key={s.id} style={srcStyle(s.id)}>
             <dt><span class="source-dot" aria-hidden="true" />{s.label}</dt>
             <dd>{formatCount(s.count)}<span> · v{s.version}</span></dd>
           </div>
         ))}
-      </dl>
-      {onPick && <p class="intro-keys"><kbd>/</kbd> search <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>}
+      </dl>}
+      {onPick && !compact && <p class="intro-keys"><kbd>/</kbd> search <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>}
     </div>
   );
 }

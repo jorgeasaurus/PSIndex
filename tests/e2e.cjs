@@ -42,6 +42,26 @@ async function hold(ctx, pattern) {
  */
 const scenarios = [
   {
+    name: 'the first screen says what the site is for',
+    context: { viewport: { width: 390, height: 844 } },
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      const h = await p.textContent('.intro-compact h2');
+      check(/PowerShell cmdlet/.test(h), 'a phone shows what PSIndex is above the results', h);
+      await p.fill('input[type=search]', 'mailbox');
+      await p.waitForFunction(() => !document.querySelector('.intro-compact'));
+      await p.fill('input[type=search]', '');
+      await p.click('.intro-compact .intro-samples button >> nth=0');
+      await topIs(p, 'Get-MgUser');
+      check(!(await p.locator('.intro-compact').count()), 'a sample search replaces the intro with its results');
+      await p.setViewportSize({ width: 1440, height: 900 });
+      await p.fill('input[type=search]', '');
+      await p.waitForSelector('.pane-detail .intro h2');
+      check(!(await p.locator('.intro-compact').count()), 'a wide screen keeps the intro in the detail pane only');
+    },
+  },
+  {
     name: 'a pasted command line searches its cmdlet',
     async run(p) {
       await p.goto(BASE);

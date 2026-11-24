@@ -8,7 +8,7 @@ import { Detail } from './Detail';
 import { Band, DescriptionsFailed, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
 import { ALL, formatCount, scopeOf, searchText } from './sources';
 import { EMPTY_FILTERS, activeFilters, readUrl, sameFilters, urlOf, writeUrl, type UrlState } from './url';
-import type { Facets, Filters, Results, Row } from './types';
+import type { Facets, Filters, Results, Row, SourceId } from './types';
 
 /**
  * Server-rendered and first paint: the static frame. Once mounted in the browser the search
@@ -283,6 +283,9 @@ function Search() {
     }
   };
 
+  // A sample is a fresh search in its source: no filters carried over that could hide it. None after
+  // a failed load, when nothing can be searched.
+  const pickSample = loadError ? undefined : (s: SourceId, sample: string) => { setFilters({ ...EMPTY_FILTERS, source: s }); setQ(sample); inputRef.current?.focus(); };
   const filterCount = activeFilters(filters);
   const clearFilters = () => setFilters({ ...EMPTY_FILTERS, source: filters.source });
   const searchFor = (text: string) => { setQ(text); inputRef.current?.focus(); };
@@ -326,6 +329,8 @@ function Search() {
       }
       toolbar={
         <>
+          {/* Narrow screens have no detail pane until an entry opens: the intro leads the results instead. */}
+          {narrow && !open && !searchText(q) && <Intro compact onPick={pickSample} />}
           <Toolbar label={countLabel} timing={timing} filterCount={filterCount} showFilters={showFilters} onToggleFilters={loadError ? undefined : () => setShowFilters((s) => !s)} />
           {/* Above the results, so it shows at every width (narrow screens hide the detail pane). */}
           {missing && (
@@ -370,7 +375,7 @@ function Search() {
           // Keyed by open: each one starts fresh (no related list or body from the previous entry).
           ? <Detail key={entryKey} row={open} client={client} onOpen={openRow} onClose={back} takeFocus={narrow} />
           // A sample is a fresh search in its source: no filters carried over that could hide it.
-          : <Intro onPick={loadError ? undefined : (s, sample) => { setFilters({ ...EMPTY_FILTERS, source: s }); setQ(sample); inputRef.current?.focus(); }} />
+          : <Intro onPick={pickSample} />
       }
     />
   );
