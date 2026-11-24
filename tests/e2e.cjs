@@ -1,5 +1,6 @@
 // End-to-end behaviour checks against a built site.
-//   npm run build && node tests/e2e.cjs
+//   npm run build && node tests/e2e.cjs            (every scenario)
+//   node tests/e2e.cjs "narrow dialog"              (scenarios whose name contains the text)
 // Serves dist/ itself on its own port (it never touches a running `astro preview`).
 // Needs Playwright with Chromium available (`npx playwright install chromium`).
 const http = require('node:http');
@@ -701,6 +702,8 @@ const scenarios = [
       await p.waitForFunction(() => new URLSearchParams(location.search).get('q') === 'get-mguser');
       await p.fill('input[type=search]', '--');
       await p.waitForFunction((t) => document.querySelector('.count')?.textContent === t, TOTAL_LABEL);
+      // The URL is written after the render that shows the count.
+      await p.waitForFunction(() => !new URLSearchParams(location.search).has('q')).catch(() => {});
       check(!param(p, 'q'), 'a query without a token is no query in the URL', p.url());
       await p.goto(`${BASE}/?s=mecm&verb=Zzz&q=--`);
       await p.waitForSelector('.empty .chip');
@@ -1047,7 +1050,9 @@ async function runScenario(browser, sc) {
     // The scenario itself passes when every wait in it was met and the page raised no errors.
     check(!errors.length, sc.name, errors.length ? `page errors: ${errors.join('; ')}` : '');
   } catch (e) {
-    check(false, sc.name, e.message.split('\n')[0]);
+    // Name every line of this file on the stack: the failing wait and the scenario step that ran it.
+    const at = [...(e.stack ?? '').matchAll(/e2e\.cjs:(\d+)/g)].map((m) => m[1]);
+    check(false, sc.name, e.message.split('\n')[0] + (at.length ? ` (at line ${[...new Set(at)].join(' < ')})` : ''));
   } finally {
     await ctx.close();
   }
@@ -1062,7 +1067,8 @@ async function runScenario(browser, sc) {
   let browser;
   try {
     browser = await chromium.launch();
-    for (const sc of scenarios) await runScenario(browser, sc);
+    const only = process.argv[2];
+    for (const sc of scenarios.filter((s) => !only || s.name.includes(only))) await runScenario(browser, sc);
   } catch (e) {
     check(false, 'harness', e.message);
   } finally {
