@@ -3,6 +3,7 @@
 // Needs Playwright with Chromium available (`npx playwright install chromium`).
 const { spawn } = require('node:child_process');
 const { chromium } = require('playwright');
+const { runMcp } = require('./mcp.cjs');
 const { total, build } = require('../src/sources.generated.json');
 const BUILD_PATH = `/a/${build}/`;
 
@@ -381,6 +382,7 @@ const astro = (...args) => new Promise((res) => spawn('npx', ['astro', 'preview'
   let browser;
   try {
     await waitForServer();
+    await runMcp(BASE, check);
     browser = await chromium.launch();
     for (const sc of scenarios) await runScenario(browser, sc);
   } catch (e) {

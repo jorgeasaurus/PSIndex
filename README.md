@@ -25,7 +25,7 @@ public/a/<build>/idx/  columnar search shards (~245 KB gzipped for all 41k cmdle
 public/a/<build>/data/ per-module detail, fetched only when an entry is opened
         │  astro build
         ▼
-dist/                 static site, deployed by Vercel on every push to main
+dist/                 static site, plus a /mcp function, deployed by Vercel on every push to main
 ```
 
 - **Search** runs in a Web Worker. Name shards load first; description shards load after the first results render and then refine ranking. Ranking: exact → prefix → noun prefix → substring → hyphenless (`getmguser`) → typo-tolerant subsequence → description.
@@ -34,14 +34,30 @@ dist/                 static site, deployed by Vercel on every push to main
 - **URLs** carry state: `?q=mguser&s=graph&verb=Get&c=graph:Get-MgUser`.
 - **Background**: an animated ASCII contour field on `<canvas>` (`src/app/ascii.ts`), tinted by the selected source and rippling from the search box as you type. ~30 fps, pauses in hidden tabs, static under `prefers-reduced-motion`.
 
+## MCP
+
+Agents can query this index over the [Model Context Protocol](https://modelcontextprotocol.io) Streamable HTTP transport at `https://psindex.vercel.app/mcp`. The endpoint is stateless and read-only, and it does not require authentication. `search_cmdlets` returns names, modules, short descriptions, and page URLs; `get_cmdlet` returns the syntax, parameters, and the rest of an entry; `list_modules` lists modules.
+
+Cursor, Claude, and VS Code accept the same shape:
+
+```json
+{
+  "mcpServers": {
+    "psindex": {
+      "url": "https://psindex.vercel.app/mcp"
+    }
+  }
+}
+```
+
 ## Develop
 
 ```bash
 npm install
 npm run dev        # builds the index, then starts Astro on http://localhost:4321
-npm run build      # index + static build into dist/
+npm run build      # index, then the site. On Vercel this also bundles /mcp
 npm run typecheck  # tsc (run after build or index, which generates src/sources.generated.json)
-npm run test:e2e   # browser checks against the built site (needs Playwright + Chromium)
+npm run test:e2e   # browser checks and MCP HTTP checks against the built site (needs Playwright + Chromium)
 ```
 
 ## Refresh data locally
@@ -59,4 +75,4 @@ PowerShell alternatives that read installed modules instead of docs: `pipelines/
 
 ## Deploy
 
-Import the repo in Vercel (framework preset: Astro; build command `npm run build`; output `dist`). `vercel.json` sets cache headers for the data files.
+Import the repo in Vercel (framework preset: Astro; build command `npm run build`). `@astrojs/vercel` publishes the static site and the `/mcp` function. `vercel.json` sets cache headers for the data files.
