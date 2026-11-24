@@ -5,7 +5,7 @@ generate JSON data files for MecmIndex.
 
 Usage: bash pipelines/refresh.sh mecm   (writes data/mecm/ via $PSINDEX_OUT)
 
-docs_dir defaults to ./docs and should contain sccm-ps/ConfigurationManager/
+The docs argument is the clone root, which contains sccm-ps/ConfigurationManager/
 """
 
 import json
@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-from common import output_dir, require_cmdlets, syntax_from
+from common import examples_from, output_dir, require_cmdlets, syntax_from
 
 NOUN_CATEGORIES = [
     ('AppV', 'Application Management'),
@@ -154,21 +154,6 @@ def parse_section(body, section_name):
     return ''
 
 
-def parse_examples(examples_section):
-    """Extract code blocks from EXAMPLES section."""
-    examples = []
-    # Look for ### Example N blocks
-    example_blocks = re.split(r'\n### ', examples_section)
-    for block in example_blocks:
-        # Find code fences
-        code_matches = re.findall(r'```(?:powershell|ps)?\n(.*?)```', block, re.DOTALL | re.IGNORECASE)
-        for code in code_matches:
-            code = code.strip()
-            if code:
-                examples.append(code)
-    return examples
-
-
 def parse_parameters_section(params_section):
     """Parse PARAMETERS section extracting per-param info."""
     params = []
@@ -266,7 +251,7 @@ def parse_cmdlet_file(filepath):
         syntax = name
 
     examples_section = parse_section(body, 'EXAMPLES')
-    examples = parse_examples(examples_section)
+    examples = examples_from(examples_section, limit=None)  # MECM keeps every example
 
     params_section = parse_section(body, 'PARAMETERS')
     parameters = parse_parameters_section(params_section)

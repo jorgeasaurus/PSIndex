@@ -68,16 +68,18 @@ const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) 
 
 /**
  * Prose from the docs as the reader should see it: line breaks the docs left as literal text
- * ("list:\\r- item") become spaces, whitespace collapses, and template placeholders ("{{ Fill in
- * the Synopsis }}") or stray markdown headings ("## SYNTAX") count as no text at all. A word that
- * is a Windows or UNC path ("C:\\reports", "\\\\server\\new") keeps its backslashes.
+ * ("list:\\r- item") become spaces, whitespace collapses, HTML comments ("<!-- 10519922 -->") go,
+ * and text that is only template placeholders ("{{ Fill in the Synopsis }}") or a stray markdown
+ * heading ("## SYNTAX") counts as no text at all. A word that is a Windows or UNC path
+ * ("C:\\reports", "\\\\server\\new") keeps its backslashes.
  */
 function cleanText(s: string): string {
   const t = s
+    .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/\S*\\[rn]\S*/g, (word) => (/(?:^|[^A-Za-z])[A-Za-z]:\\[\w.$]{2}|^\\\\/.test(word) ? word : word.replace(/\\[rn]/g, ' ')))
     .replace(/\s+/g, ' ')
     .trim();
-  return /^\{\{.*\}\}$/.test(t) || /^#+\s/.test(t) ? '' : t;
+  return /^(?:\{\{[^}]*\}\}\s*)+$/.test(t) || /^#+\s/.test(t) ? '' : t;
 }
 
 /** An example that is only the docs template's placeholder ("PS C:\\> {{ Add example code here }}") is no example. */

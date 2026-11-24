@@ -9,18 +9,17 @@ and produces:
 Usage:
     bash pipelines/refresh.sh graph   (writes data/graph/ via $PSINDEX_OUT)
 
-docs_dir defaults to ./docs and should point to the directory containing
+The docs directory argument is the one containing
 graph-powershell-1.0/ and graph-powershell-beta/ subdirectories.
 """
 
 import json
-import os
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-from common import gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
+from common import examples_from, gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -51,7 +50,6 @@ CATEGORY_MAP = [
     ("CloudCommunications", "Communications"),
 ]
 
-MAX_EXAMPLES = 3
 
 
 def get_category(module_name: str) -> str:
@@ -140,24 +138,6 @@ def extract_permissions(section: str) -> list:
     return sorted(permissions)
 
 
-def extract_examples(section: str) -> list:
-    """Extract up to MAX_EXAMPLES code blocks from EXAMPLES section."""
-    examples = []
-    for m in re.finditer(r"```(?:powershell)?\s*\n(.*?)```", section, re.DOTALL):
-        code = m.group(1).strip()
-        # Strip PS C:\> prompts
-        lines = []
-        for line in code.splitlines():
-            cleaned = re.sub(r"^PS\s+C:\\>\s*", "", line)
-            lines.append(cleaned)
-        code = "\n".join(lines).strip()
-        if code:
-            examples.append(code)
-        if len(examples) >= MAX_EXAMPLES:
-            break
-    return examples
-
-
 def parse_cmdlet_file(filepath, module_name, api_version):
     """Parse a single cmdlet markdown file."""
     try:
@@ -192,7 +172,7 @@ def parse_cmdlet_file(filepath, module_name, api_version):
 
     # EXAMPLES -> code blocks
     examples_section = extract_section(text, "EXAMPLES")
-    examples = extract_examples(examples_section)
+    examples = examples_from(examples_section)
 
     verb = cmdlet_name.split("-")[0] if "-" in cmdlet_name else ""
 
@@ -226,13 +206,12 @@ def scan_version_dir(version_dir: Path, api_version: str) -> list:
 
 
 def main():
-    docs_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("./docs")
-
+    if len(sys.argv) < 2:
+        sys.exit("Usage: parse_docs.py <microsoftgraph-docs-powershell docs dir>  (run through pipelines/refresh.sh graph)")
+    data_dir = output_dir()  # checked before the docs path, like every parser
+    docs_dir = Path(sys.argv[1])
     if not docs_dir.is_dir():
-        print(f"Error: docs directory not found: {docs_dir}", file=sys.stderr)
-        sys.exit(1)
-
-    data_dir = output_dir()
+        sys.exit(f"::error::graph: docs directory not found: {docs_dir}")
     modules_dir = data_dir / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
