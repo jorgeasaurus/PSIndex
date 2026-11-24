@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { build, publicDir } from 'astro:config/server';
 import { artifactPath } from '../app/artifacts';
 import { parseSyntax, withDocumented } from '../app/powershell';
-import { prepareSource, rowOf, rowsNamed, searchHits, setDescriptions, type Loaded } from '../app/search-core';
+import { prepareSource, rowOf, rowsNamed, searchHits, setDescriptions, type Loaded, descriptionsOf } from '../app/search-core';
 import { SOURCES, queryTokens } from '../app/sources';
 import type { CmdletFile, IndexShard, Row } from '../app/types';
 import { EMPTY_FILTERS } from '../app/url';
@@ -141,7 +141,7 @@ function hit(origin: string, row: Row): CmdletHit {
   };
 }
 
-export async function searchCmdlets(origin: string, query: string, module: string | undefined, limit: number): Promise<ToolResult<{ results: CmdletHit[]; truncated: boolean }>> {
+export async function searchCmdlets(origin: string, query: string, module: string | undefined, limit: number): Promise<ToolResult<{ results: CmdletHit[]; truncated: boolean; namesOnly: string[] }>> {
   // The site lists every cmdlet for an empty box. A query of only punctuation has no tokens
   // (queryTokens), and the ranker would do the same. That is not a search.
   if (!queryTokens(query).length) return { ok: false, message: 'Query needs an ASCII letter or digit; cmdlet names are ASCII, so punctuation or other scripts alone match nothing.' };
@@ -157,6 +157,9 @@ export async function searchCmdlets(origin: string, query: string, module: strin
     data: {
       results: hits.slice(0, limit).map((h) => hit(origin, rowOf(all, h.ref))),
       truncated: hits.length > limit,
+      // Sources whose descriptions did not load: only names matched there, so an empty result
+      // does not mean no cmdlet fits (the site shows a notice in the same case).
+      namesOnly: descriptionsOf(all).failed,
     },
   };
 }

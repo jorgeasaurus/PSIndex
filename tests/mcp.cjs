@@ -2,7 +2,7 @@
 //   npm run build && node tests/mcp.cjs
 // The browser suite serves dist/ as static files and cannot answer /mcp.
 const { spawn } = require('node:child_process');
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const net = require('node:net');
 const { join } = require('node:path');
 
@@ -117,6 +117,7 @@ async function runMcp(base, check) {
 
   const found = toolData((await call(3, 'search_cmdlets', { query: 'Get-MgUser', limit: 5 })).body);
   const top = found.data?.results?.[0];
+  check(Array.isArray(found.data?.namesOnly) && !found.data.namesOnly.length, 'mcp search_cmdlets namesOnly empty when every description shard loads', JSON.stringify(found.data?.namesOnly ?? found.error).slice(0, 200));
   check(
     top?.name === 'Get-MgUser' && top.module === 'Microsoft.Graph.Users' && top.source === 'graph' && typeof top.description === 'string' && top.description.length > 0 && top.url === `${base}/?c=graph%3AGet-MgUser`,
     'mcp search_cmdlets Get-MgUser, url on the called origin',
@@ -224,6 +225,8 @@ if (require.main === module) {
   (async () => {
     let port = 0;
     try {
+      // Node's own MODULE_NOT_FOUND trace is too long for the log tail to keep the path.
+      if (!existsSync(join(ROOT, 'dist', 'server', 'entry.mjs'))) throw new Error('dist/server/entry.mjs is missing; run npm run build first');
       port = await freePort();
       const base = `http://127.0.0.1:${port}`;
       child = spawn(process.execPath, ['dist/server/entry.mjs'], {
@@ -244,9 +247,15 @@ if (require.main === module) {
         if (i === 79) throw new Error(`server did not answer on ${base}/mcp within 20 s (${log.trim().split('\n').slice(-6).join(' | ') || 'no output'})`);
         await new Promise((r) => setTimeout(r, 250));
       }
-      // If the child dies mid-run, say so instead of reporting a list of failed requests.
+      // If the child dies mid-run, say so instead of reporting a list of failed requests. The
+      // request it dropped usually rejects before its 'exit' event, so give that event a moment
+      // and let the exit reason replace the fetch error.
+      const run = runMcp(base, check).catch(async (err) => {
+        const gone = await Promise.race([exited.then(() => true), new Promise((r) => setTimeout(r, 1000, false))]);
+        throw gone ? new Error(exitReason(port)) : err;
+      });
       await Promise.race([
-        runMcp(base, check),
+        run,
         exited.then(() => { if (!stopping) throw new Error(exitReason(port)); }),
       ]);
     } catch (e) {
