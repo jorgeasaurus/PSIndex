@@ -308,6 +308,8 @@ const scenarios = [
       await p.goto(`${BASE}/?s=entra&q=Connect-Entra&c=entra:Connect-Entra`);
       await p.waitForFunction(() => new URLSearchParams(location.search).get('c')?.includes('@'));
       const c = param(p, 'c');
+      // The key resolves before the list's rows arrive (separate worker replies): wait for the row.
+      await p.waitForSelector('.result.is-open');
       check(c.includes('@') && (await p.locator('.result.is-open').count()) === 1, 'legacy link is canonicalised', c);
     },
   },
