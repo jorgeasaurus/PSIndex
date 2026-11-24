@@ -554,6 +554,62 @@ kbd {
 .intro-keys kbd:not(:first-child) { margin-left: 10px; }
 .intro-keys kbd + kbd:not(:first-child) { margin-left: -2px; }
 
+/* ---------- MCP panel ---------- */
+.mcp {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-solid);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.mcp::backdrop { background: rgb(9 12 19 / 0.62); }
+.mcp-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 12px 8px 20px;
+  background: var(--surface-solid);
+}
+.mcp h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
+.mcp h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.mcp-body { display: grid; gap: 22px; padding: 4px 20px 20px; }
+.mcp-body > p { margin: 0; color: var(--muted); font-size: 14px; max-width: 62ch; }
+.mcp-setups { display: grid; gap: 18px; }
+.mcp-file { margin: -4px 0 8px; color: var(--text); font-family: var(--font-code); font-size: 13px; overflow-wrap: anywhere; }
+.mcp-note { margin: -4px 0 8px; color: var(--muted); font-size: 13px; }
+.mcp-endpoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.mcp-endpoint code { flex: 1; min-width: 0; overflow-wrap: break-word; font-size: 13px; }
+.mcp-endpoint .btn { flex: none; }
+.mcp-tools { display: grid; gap: 10px; margin: 0; }
+.mcp-tools div { display: grid; gap: 2px; }
+.mcp-tools dt code { font-size: 13px; }
+.mcp-tools dd { margin: 0; color: var(--muted); font-size: 14px; }
+@media (max-width: 900px) {
+  .mcp-head { padding: 14px 8px 6px 16px; }
+  .mcp-body { padding: 2px 16px 16px; gap: 18px; }
+  /* The URL and the Copy button share a row on desktop. On a phone the button takes the next line, so the URL is not broken mid-word. */
+  .mcp-endpoint code { flex-basis: 100%; }
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
   .tagline { display: none; }

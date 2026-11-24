@@ -510,6 +510,138 @@ const scenarios = [
     },
   },
   {
+    name: 'MCP info panel',
+    context: {
+      viewport: { width: 1280, height: 800 },
+      permissions: ['clipboard-read', 'clipboard-write'],
+    },
+    async run(p) {
+      const URL = 'https://psindex.vercel.app/mcp';
+      const openBtn = 'button[aria-label="Use with AI agents"]';
+      await p.addInitScript(() => localStorage.setItem('psindex-theme', 'dark'));
+      await p.goto(BASE);
+      await rowsReady(p);
+      await p.fill('input[type=search]', 'get-mguser');
+      const trigger = await p.locator(openBtn).boundingBox();
+      check(trigger && trigger.width >= 24 && trigger.height >= 24, 'the info button is a tappable control', JSON.stringify(trigger));
+
+      await p.focus(openBtn);
+      await p.keyboard.press('Enter');
+      await p.waitForSelector('#mcp-panel[open]');
+      const opened = await p.evaluate(() => {
+        const d = document.querySelector('#mcp-panel');
+        const a = document.activeElement;
+        return {
+          role: d.getAttribute('role') || d.tagName === 'DIALOG',
+          modal: d.getAttribute('aria-modal'),
+          labelled: d.getAttribute('aria-labelledby'),
+          title: document.getElementById('mcp-title')?.textContent,
+          focusInside: d === a || d.contains(a),
+        };
+      });
+      check(opened.role && opened.modal === 'true' && opened.labelled === 'mcp-title' && opened.title === 'Use with AI agents' && opened.focusInside, 'the panel is a named modal and takes focus', JSON.stringify(opened));
+
+      for (let i = 0; i < 12; i++) await p.keyboard.press('Tab');
+      const tabStays = await p.evaluate(() => {
+        const d = document.querySelector('#mcp-panel');
+        const a = document.activeElement;
+        return d === a || d.contains(a);
+      });
+      check(tabStays, 'Tab stays inside the panel');
+
+      const text = await p.locator('#mcp-panel').innerText();
+      check(/no authentication/i.test(text) && /read-only/i.test(text), 'says what the endpoint is', text.split('\n')[1]);
+      check(text.includes(URL) && text.includes('~/.cursor/mcp.json') && text.includes('.mcp.json') && text.includes('claude_desktop_config.json'), 'shows the endpoint and the three config files');
+      check(['search_cmdlets', 'get_cmdlet', 'list_modules'].every((name) => text.includes(name)), 'names the three tools');
+
+      await p.click('#mcp-panel button[aria-label="Copy endpoint"]');
+      await p.waitForFunction(() => document.querySelector('#mcp-panel')?.innerText.includes('Copied'));
+      check(await p.evaluate(() => navigator.clipboard.readText()) === URL, 'copy endpoint writes the URL');
+
+      const readConfig = async (label) => {
+        await p.click(`#mcp-panel button[aria-label="${label}"]`);
+        await p.waitForFunction((name) => document.querySelector(`#mcp-panel button[aria-label="${name}"]`)?.classList.contains('is-done'), label);
+        return p.evaluate(() => navigator.clipboard.readText());
+      };
+      const cursor = JSON.parse(await readConfig('Copy Cursor config'));
+      const vscode = JSON.parse(await readConfig('Copy VS Code config'));
+      const claude = JSON.parse(await readConfig('Copy Claude Desktop config'));
+      check(cursor.mcpServers?.psindex?.url === URL && !cursor.mcpServers.psindex.type, 'Cursor config is a remote mcpServers url', JSON.stringify(cursor));
+      check(vscode.mcpServers?.psindex?.type === 'http' && vscode.mcpServers.psindex.url === URL && !vscode.servers, 'VS Code config is mcpServers with type http', JSON.stringify(vscode));
+      check(claude.mcpServers?.psindex?.command === 'npx' && claude.mcpServers.psindex.args?.includes('mcp-remote') && claude.mcpServers.psindex.args?.includes(URL), 'Claude Desktop config runs mcp-remote', JSON.stringify(claude));
+
+      await p.keyboard.press('/');
+      const slashStays = await p.evaluate(() => {
+        const d = document.querySelector('#mcp-panel');
+        const a = document.activeElement;
+        return d.open && (d === a || d.contains(a));
+      });
+      check(slashStays, '"/" does not leave the panel');
+      await p.keyboard.press('Escape');
+      await p.waitForFunction(() => !document.querySelector('#mcp-panel')?.open);
+      const afterEsc = await p.evaluate(() => ({
+        focus: document.activeElement?.getAttribute('aria-label'),
+        q: document.querySelector('input[type=search]').value,
+      }));
+      check(afterEsc.focus === 'Use with AI agents' && afterEsc.q === 'get-mguser', 'Escape closes the panel, restores focus, and keeps the query', JSON.stringify(afterEsc));
+
+      await p.click(openBtn);
+      await p.waitForSelector('#mcp-panel[open]');
+      // A scrollbar click targets the scroller and lands inside its box. That must not dismiss.
+      const insideStays = await p.evaluate(() => {
+        const el = document.querySelector('#mcp-panel');
+        const scroller = el.querySelector('.mcp-body');
+        const r = scroller.getBoundingClientRect();
+        scroller.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.right - 3, clientY: r.top + 80 }));
+        const box = el.getBoundingClientRect();
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: box.right - 3, clientY: box.top + box.height / 2 }));
+        return el.open;
+      });
+      check(insideStays, 'a click inside the dialog, including its scrollbar, keeps it open');
+      const box = await p.locator('#mcp-panel').boundingBox();
+      await p.mouse.click(box.x - 8, box.y + 24);
+      await p.waitForFunction(() => !document.querySelector('#mcp-panel')?.open);
+      check(true, 'a backdrop click closes the panel');
+
+      const fits = async (theme) => {
+        await p.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
+        await p.click(openBtn);
+        await p.waitForSelector('#mcp-panel[open]');
+        const laid = await p.evaluate(() => {
+          const d = document.querySelector('#mcp-panel');
+          const r = d.getBoundingClientRect();
+          const cs = getComputedStyle(d);
+          return {
+            scroll: document.documentElement.scrollWidth,
+            left: r.left,
+            right: r.right,
+            top: r.top,
+            bottom: r.bottom,
+            vw: window.innerWidth,
+            vh: window.innerHeight,
+            bg: cs.backgroundColor,
+            color: cs.color,
+          };
+        });
+        check(
+          laid.scroll <= laid.vw + 1 && laid.left >= -1 && laid.right <= laid.vw + 1 && laid.top >= -1 && laid.bottom <= laid.vh + 1,
+          `panel fits at ${theme}`,
+          JSON.stringify(laid),
+        );
+        await p.keyboard.press('Escape');
+        await p.waitForFunction(() => !document.querySelector('#mcp-panel')?.open);
+        return laid.bg;
+      };
+
+      await p.setViewportSize({ width: 390, height: 844 });
+      const phoneBtn = await p.locator(openBtn).boundingBox();
+      check(phoneBtn && phoneBtn.x >= 0 && phoneBtn.x + phoneBtn.width <= 390 && phoneBtn.width >= 24, 'the info button fits and stays tappable at 390px', JSON.stringify(phoneBtn));
+      const darkBg = await fits('dark');
+      const lightBg = await fits('light');
+      check(darkBg !== lightBg, 'the panel follows the light and dark themes', `${darkBg} / ${lightBg}`);
+    },
+  },
+  {
     name: 'dismissed deep link',
     async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`); },
     async run(p) {
