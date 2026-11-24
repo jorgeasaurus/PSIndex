@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { artifactPath } from './artifacts';
-import { facetsFor, prepareSource, refOfKey, related, rowOf, searchHits, setDescriptions, type Loaded } from './search-core';
+import { descriptionsOf, facetsFor, prepareSource, refOfKey, related, rowOf, searchHits, setDescriptions, type Loaded } from './search-core';
 import { SOURCES, fetchAsset, scopeOf } from './sources';
 import type { Filters, FromWorker, IndexShard, RequestType, Requests, ToWorker } from './types';
 
@@ -16,8 +16,8 @@ async function loadSource(si: number): Promise<Loaded> {
 }
 
 async function loadDescriptions(L: Loaded) {
-  const desc = await fetchAsset<string[]>(artifactPath.desc(L.id)).catch(() => null);
-  if (!desc) return; // descriptions only refine ranking; without them names still search
+  // Descriptions only refine matching: without them names still search, and the page says so.
+  const desc = await fetchAsset<string[]>(artifactPath.desc(L.id)).catch((e) => (console.error('[psindex] descriptions failed', L.id, e), null));
   setDescriptions(L, desc);
 }
 
@@ -35,7 +35,7 @@ index.then(async (all) => {
   if (lastSearch) runSearch(all, lastSearch);
 }, (e) => {
   console.error('[psindex] index load failed', e);
-  post({ type: 'load-error', message: String(e?.message ?? e) });
+  post({ type: 'load-error', message: e instanceof Error ? e.message : String(e) });
 });
 
 function runSearch(all: Loaded[], { id, q, filters }: Search) {
@@ -44,7 +44,7 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   const { sources, perSourceFacets } = scopeOf(filters.source);
   const scope = all.filter((L) => sources.some((s) => s.id === L.id));
   const refs = Int32Array.from(hits, (h) => h.ref);
-  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0 }, [refs.buffer]);
+  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0, descriptions: descriptionsOf(scope) }, [refs.buffer]);
 }
 
 /** One handler per request; the compiler checks each reply against Requests in types.ts. */
@@ -63,9 +63,8 @@ const answer = (all: Loaded[], m: Exclude<ToWorker, { type: 'search' }>) => hand
 // Messages are handled in arrival order: each waits on the same `index` promise, whose callbacks run in order.
 self.onmessage = ({ data: m }: MessageEvent<ToWorker>) => {
   if (m.type === 'search') {
-    lastSearch = m;
-    // Only the latest search is worth running; older ones that queued behind the load are dropped.
-    index.then((all) => { if (m === lastSearch) runSearch(all, m); }, () => {});
+    lastSearch = m; // re-run when descriptions arrive
+    index.then((all) => runSearch(all, m), () => {}); // the client sends one search at a time
     return;
   }
   // After a failed load nothing is answered: the page shows the load error instead.

@@ -15,11 +15,9 @@ import os
 import re
 import json
 import sys
-import urllib.request
-import urllib.error
 from pathlib import Path
 
-from common import output_dir, source_version
+from common import gallery_module_versions, output_dir, require_cmdlets, source_version, syntax_from
 
 # -- Workload directories relative to the repo root -------------------------
 WORKLOAD_DIRS = [
@@ -59,42 +57,6 @@ MODULE_PACKAGE_MAP = {
     'WhiteboardAdmin': 'WhiteboardAdmin',
     'Microsoft.SharePoint.MigrationTool.PowerShell': 'Microsoft.SharePoint.MigrationTool',
 }
-
-PSGALLERY_API = (
-    "https://www.powershellgallery.com/api/v2/FindPackagesById()"
-    "?id='{}'"
-    "&$orderby=Version%20desc"
-    "&$top=1"
-    "&$filter=IsPrerelease%20eq%20false"
-)
-
-
-def fetch_gallery_version(package_name):
-    """Fetch the latest stable version of a package from PowerShell Gallery."""
-    url = PSGALLERY_API.format(package_name)
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'ExchIndex/1.0'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = resp.read().decode('utf-8')
-        m = re.search(r'<d:Version[^>]*>([^<]+)</d:Version>', data)
-        return m.group(1) if m else ''
-    except (urllib.error.URLError, OSError) as e:
-        print(f"  Warning: Could not fetch version for {package_name}: {e}")
-        return ''
-
-
-def fetch_module_versions():
-    """Fetch latest stable versions for all known modules from PowerShell Gallery."""
-    versions = {}
-    for module_name, package_name in MODULE_PACKAGE_MAP.items():
-        ver = fetch_gallery_version(package_name)
-        if ver:
-            versions[module_name] = ver
-            print(f"  {module_name}: v{ver} (from {package_name})")
-        else:
-            print(f"  {module_name}: version not found")
-    return versions
-
 
 def get_exchange_category(cmdlet_name):
     """Map an Exchange cmdlet to a sub-category by its noun."""
@@ -171,8 +133,7 @@ def parse_cmdlet_doc(filepath, workload_name):
     description = re.sub(r'[*_`]', '', description).strip()
 
     syntax_sec = extract_section(text, 'SYNTAX')
-    syntax_blocks = extract_code_blocks(syntax_sec, 1)
-    syntax = syntax_blocks[0] if syntax_blocks else ''
+    syntax = syntax_from(syntax_sec)
 
     examples_sec = extract_section(text, 'EXAMPLES')
     examples = extract_code_blocks(examples_sec, 3)
@@ -197,8 +158,7 @@ def main():
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Fetching module versions from PowerShell Gallery...")
-    module_versions = fetch_module_versions()
+    module_versions = gallery_module_versions(MODULE_PACKAGE_MAP, 'exchange')
     primary_version = source_version(module_versions.get('ExchangePowerShell'), 'exchange')
 
     manifest_entries = []
@@ -249,6 +209,7 @@ def main():
         print(f"  {workload_name}: {count} cmdlets from {workload_dir}")
 
     print(f"\nProcessed {len(manifest_entries)} cmdlets across {len(modules_data)} modules")
+    require_cmdlets('exchange', len(manifest_entries))
 
     # Write manifest.json
     manifest = {'v': primary_version, 'd': manifest_entries}

@@ -2,8 +2,10 @@
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -64,15 +66,100 @@ def parse_dependencies(atom):
     return dict(re.findall(r"([\w.]+):[\[(]?\s*([\d.]+)", m.group(1)))
 
 
-def gallery_dependencies(package, version):
-    """The module versions a PowerShell Gallery package release depends on, or {} if the lookup fails."""
-    url = f"https://www.powershellgallery.com/api/v2/Packages(Id='{package}',Version='{version}')"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "PSIndex"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            deps = parse_dependencies(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError) as e:
-        print(f"::warning::{package} {version}: PowerShell Gallery lookup failed ({e}); module versions left blank")
-        return {}
-    print(f"  {package} {version}: {len(deps)} module versions from the PowerShell Gallery")
-    return deps
+GALLERY = "https://www.powershellgallery.com/api/v2"
+
+
+def _gallery_get(url):
+    """GET a PowerShell Gallery feed URL: three attempts with backoff. The body, or None after the last failure."""
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "PSIndex"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8")
+        except (urllib.error.URLError, OSError) as e:
+            if attempt == 2:
+                print(f"  PowerShell Gallery request failed: {e}")
+                return None
+            time.sleep(2 ** attempt)
+
+
+def gallery_latest_version(package):
+    """The latest stable version of a PowerShell Gallery package, or None if the lookup fails."""
+    url = f"{GALLERY}/FindPackagesById()?id='{package}'"
+    while url:
+        body = _gallery_get(url)
+        if body is None:
+            return None
+        versions = re.findall(r"<d:Version>([^<]+)</d:Version>", body)
+        latest = re.findall(r"<d:IsLatestVersion[^>]*>([^<]+)</d:IsLatestVersion>", body)
+        for version, flag in zip(versions, latest):
+            if flag == "true":
+                return version
+        nxt = re.search(r'<link rel="next" href="([^"]+)"', body)
+        url = nxt.group(1).replace("&amp;", "&") if nxt else None
+    return None
+
+
+def previous_module_versions(source_id):
+    """Module name -> version as the last successful run committed them (module files' "version")."""
+    out = {}
+    for f in (source_dir(source_id) / "modules").glob("*.json"):
+        try:
+            version = json.loads(f.read_text(encoding="utf-8")).get("version")
+        except (OSError, ValueError):
+            continue
+        if version:
+            out[f.stem] = version
+    return out
+
+
+def gallery_module_versions(packages, source_id):
+    """Module name -> latest PowerShell Gallery version, for {module name: Gallery package}.
+
+    A module whose lookup fails keeps its last committed version (with a warning), as
+    source_version does for the source's own version, so an outage never blanks them.
+    """
+    print(f"Fetching module versions from the PowerShell Gallery ({len(packages)} modules)...")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        found = dict(zip(packages, executor.map(gallery_latest_version, packages.values())))
+    missing = [m for m, v in found.items() if not v]
+    print(f"  Resolved {len(found) - len(missing)}/{len(found)} module versions")
+    if missing:
+        previous = previous_module_versions(source_id)
+        print(f"::warning::{source_id}: {len(missing)} module versions unavailable; keeping the previous ones")
+        for m in missing:
+            found[m] = previous.get(m)
+    return found
+
+
+def gallery_dependencies(package, version, source_id):
+    """The module versions a PowerShell Gallery package release depends on.
+
+    If the lookup fails, the last committed module versions are kept (with a warning), as
+    source_version does for the source's own version.
+    """
+    body = _gallery_get(f"{GALLERY}/Packages(Id='{package}',Version='{version}')")
+    deps = parse_dependencies(body) if body else {}
+    if deps:
+        print(f"  {package} {version}: {len(deps)} module versions from the PowerShell Gallery")
+        return deps
+    print(f"::warning::{source_id}: {package} {version} dependencies unavailable; keeping the previous module versions")
+    return previous_module_versions(source_id)
+
+
+def syntax_from(section):
+    """Every parameter set in a SYNTAX section: the docs give one fenced code block per set.
+
+    The sets are joined by a blank line; the site splits them again at each line starting with
+    the cmdlet name. Comment lines ("# ParameterSetName") are dropped.
+    """
+    blocks = re.findall(r"```[^\n]*\n(.*?)```", section, re.DOTALL)
+    # Some docs label a set with a "# ..." comment line; the set itself starts at the cmdlet name.
+    sets = ["\n".join(l for l in b.splitlines() if not l.lstrip().startswith("#")).strip() for b in blocks]
+    return "\n\n".join(s for s in sets if s)
+
+
+def require_cmdlets(source_id, count):
+    """A run that found no cmdlets (an upstream folder renamed or emptied) fails rather than publish an empty source."""
+    if not count:
+        raise SystemExit(f"::error::{source_id}: no cmdlets found in the docs; refusing to write an empty source")

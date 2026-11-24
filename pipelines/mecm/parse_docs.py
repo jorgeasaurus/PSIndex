@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-from common import output_dir
+from common import output_dir, require_cmdlets, syntax_from
 
 NOUN_CATEGORIES = [
     ('AppV', 'Application Management'),
@@ -154,24 +154,6 @@ def parse_section(body, section_name):
     return ''
 
 
-def parse_syntax(syntax_section):
-    """Extract first syntax block from SYNTAX section."""
-    lines = []
-    in_block = False
-    for line in syntax_section.splitlines():
-        if line.strip().startswith('```'):
-            if in_block:
-                break
-            in_block = True
-            continue
-        if in_block:
-            lines.append(line)
-    if lines:
-        return '\n'.join(lines).strip()
-    # Fallback: return plain text
-    return syntax_section.strip()
-
-
 def parse_examples(examples_section):
     """Extract code blocks from EXAMPLES section."""
     examples = []
@@ -236,7 +218,7 @@ def parse_parameters_section(params_section):
                 'name': param_name,
                 'type': param_type,
                 'required': required,
-                'description': description[:200] if description else '',
+                'description': description or '',
             })
     return params
 
@@ -279,7 +261,7 @@ def parse_cmdlet_file(filepath):
     site_role = detect_site_role(description_text + ' ' + synopsis)
 
     syntax_section = parse_section(body, 'SYNTAX')
-    syntax = parse_syntax(syntax_section)
+    syntax = syntax_from(syntax_section)
     if not syntax:
         syntax = name
 
@@ -292,7 +274,7 @@ def parse_cmdlet_file(filepath):
     has_examples = len(examples) > 0
 
     # Use synopsis as description, fall back to first sentence of description
-    description = synopsis or (description_text[:200] if description_text else f'Configuration Manager {noun_stripped} cmdlet.')
+    description = synopsis or description_text or f'Configuration Manager {noun_stripped} cmdlet.'
 
     return {
         'name': name,
@@ -309,15 +291,12 @@ def parse_cmdlet_file(filepath):
 
 
 def main():
-    docs_dir = sys.argv[1] if len(sys.argv) > 1 else './docs'
-    cmdlets_dir = os.path.join(docs_dir, 'sccm-ps', 'ConfigurationManager')
-
+    if len(sys.argv) < 2:
+        sys.exit('Usage: parse_docs.py <sccm-docs clone root>  (run through pipelines/refresh.sh mecm)')
+    out_dir = output_dir()  # checked before the (slow) parse, like every parser
+    cmdlets_dir = os.path.join(sys.argv[1], 'sccm-ps', 'ConfigurationManager')
     if not os.path.isdir(cmdlets_dir):
-        # Try the docs_dir directly
-        cmdlets_dir = docs_dir
-        if not os.path.isdir(cmdlets_dir):
-            print(f'ERROR: Cannot find cmdlets directory. Tried:\n  {cmdlets_dir}', file=sys.stderr)
-            sys.exit(1)
+        sys.exit(f'ERROR: {cmdlets_dir} not found')
 
     print(f'Scanning: {cmdlets_dir}')
 
@@ -332,9 +311,7 @@ def main():
 
     print(f'Parsed {len(all_cmdlets)} cmdlets')
 
-    if not all_cmdlets:
-        print('WARNING: No cmdlets parsed. Check the docs directory path.', file=sys.stderr)
-        sys.exit(1)
+    require_cmdlets('mecm', len(all_cmdlets))
 
     # Group by category
     categories = {}
@@ -349,7 +326,6 @@ def main():
         }
 
     # Output directory
-    out_dir = output_dir()
     modules_dir = out_dir / 'modules'
     modules_dir.mkdir(parents=True, exist_ok=True)
 

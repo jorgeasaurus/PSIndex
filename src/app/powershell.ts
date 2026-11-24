@@ -1,8 +1,11 @@
 // Tiny PowerShell tokenizer for syntax blocks and examples. Returns tokens; the UI renders them.
 // Token kinds and their patterns, in match order. The kinds become CSS classes (`t-<kind>`, Detail.tsx).
 const PATTERNS = {
-  com: String.raw`#[^\n]*`,
-  str: String.raw`"(?:[^"\\\x60]|[\\\x60].)*"|'(?:[^']|'')*'`,
+  // A block comment (<# ... #>) or a line comment.
+  com: String.raw`<#[\s\S]*?#>|#[^\n]*`,
+  // Here-strings (@" ... "@ on lines of their own) hold quotes freely, so they come first.
+  // PowerShell escapes with a backtick or a doubled quote; a backslash is an ordinary character ("C:\Temp\").
+  str: String.raw`@"[ \t]*\r?\n[\s\S]*?\r?\n"@|@'[ \t]*\r?\n[\s\S]*?\r?\n'@|"(?:[^"\x60]|\x60.|"")*"|'(?:[^']|'')*'`,
   var: String.raw`\$(?:\{[^}]*\}|[\w:]+)`,
   cmd: String.raw`\b[A-Z][a-z]+-[A-Za-z0-9]+\b`,
   param: String.raw`(?<![\w-])-[A-Za-z][\w]*`,
@@ -95,29 +98,49 @@ function paramsOf(group: string): Param[] {
   });
 }
 
+/**
+ * The parameter sets in a SYNTAX block: each starts on a line beginning with the cmdlet's name
+ * (the block's first word). Blank lines inside one set (docs that wrap a long set) don't split it.
+ */
+function setsOf(syntax: string): string[] {
+  const name = syntax.trim().split(/\s/, 1)[0];
+  if (!name) return [];
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return syntax.split(new RegExp(`^(?=\\s*${escaped}(?:\\s|$))`, 'm'));
+}
+
 export function parseSyntax(syntax: string): Syntax {
-  const sets = syntax.split(/\n\s*\n/).map((s) => groupsOf(s)).filter((g) => g.length);
-  const seen = new Map<string, Param>();
-  for (const p of sets.flat().flatMap(paramsOf)) {
-    const prev = seen.get(p.name);
-    if (!prev) seen.set(p.name, p);
-    else {
-      prev.required &&= p.required; // required only if every set requires it
+  const sets = setsOf(syntax).map(groupsOf).filter((g) => g.length);
+  // A parameter is required only if every set has it and every set requires it.
+  const seen = new Map<string, Param & { sets: number }>();
+  for (const set of sets) {
+    for (const p of set.flatMap(paramsOf)) {
+      const prev = seen.get(p.name);
+      if (!prev) { seen.set(p.name, { ...p, sets: 1 }); continue; }
+      prev.required &&= p.required;
+      prev.sets++;
       if (prev.type === 'Switch') prev.type = p.type;
     }
   }
-  const params = [...seen.values()].sort((a, b) => Number(b.required) - Number(a.required) || Number(COMMON.has(a.name)) - Number(COMMON.has(b.name)));
+  const params = [...seen.values()]
+    .map(({ sets: n, ...p }) => ({ ...p, required: p.required && n === sets.length }))
+    .sort((a, b) => Number(b.required) - Number(a.required) || Number(COMMON.has(a.name)) - Number(COMMON.has(b.name)));
   return { sets, params };
 }
 
-/** Parameters some pipelines document (MECM) take precedence; the syntax fills in type and position. */
+/**
+ * Parameters some pipelines document (MECM) take precedence for their order and descriptions.
+ * Type, position and "required" come from the syntax alone: the docs' own Required flag is per
+ * parameter set, so it would mark a parameter of one set as always required. A parameter the
+ * syntax doesn't show is not known to be required anywhere.
+ */
 export function withDocumented(parsed: Param[], documented: DocumentedParam[]): Param[] {
   if (!documented.length) return parsed;
   const byName = new Map(parsed.map((p) => [p.name, p]));
   return documented.map((p) => ({
     name: p.name,
     type: p.type || byName.get(p.name)?.type || '',
-    required: p.required,
+    required: byName.get(p.name)?.required ?? false,
     positional: byName.get(p.name)?.positional ?? false,
     description: p.description,
   }));

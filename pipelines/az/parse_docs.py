@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from common import gallery_dependencies, output_dir, source_version
+from common import gallery_dependencies, output_dir, require_cmdlets, source_version, syntax_from
 
 # ── Category mapping ──────────────────────────────────────────────────────────
 CATEGORY_MAP = [
@@ -153,8 +153,7 @@ def parse_cmdlet_doc(filepath):
     description = re.sub(r'[*_`]', '', description).strip()
 
     syntax_sec = extract_section(text, 'SYNTAX')
-    syntax_blocks = extract_code_blocks(syntax_sec, 1)
-    syntax = syntax_blocks[0] if syntax_blocks else ''
+    syntax = syntax_from(syntax_sec)
 
     examples_sec = extract_section(text, 'EXAMPLES')
     examples = extract_code_blocks(examples_sec, 3)
@@ -171,6 +170,8 @@ def parse_cmdlet_doc(filepath):
 def find_latest_azps_dir(docs_root):
     """Find the highest-versioned azps-* subdirectory."""
     root = Path(docs_root)
+    if not root.is_dir():
+        raise SystemExit(f'::error::az: docs root {docs_root} is not a directory')
     candidates = [d for d in root.iterdir() if d.is_dir() and d.name.startswith('azps-')]
     if not candidates:
         # Look one level deeper
@@ -178,7 +179,7 @@ def find_latest_azps_dir(docs_root):
             if sub.is_dir():
                 candidates += [d for d in sub.iterdir() if d.is_dir() and d.name.startswith('azps-')]
     if not candidates:
-        raise FileNotFoundError(f'No azps-* directory found under {docs_root}')
+        raise SystemExit(f'::error::az: no azps-* docs directory under {docs_root}; the upstream layout changed or the clone failed')
 
     def ver_key(d):
         parts = re.findall(r'\d+', d.name)
@@ -209,7 +210,7 @@ def main():
 
     # Each Az.* module's version is the one the Az rollup release bundles (the docs' own
     # "Module Version" front matter is a 0.0.0 placeholder).
-    module_version_map = gallery_dependencies('Az', version)
+    module_version_map = gallery_dependencies('Az', version, 'az')
 
     # Scan Az.* module directories
     for mod_dir in sorted(azps_dir.iterdir()):
@@ -253,6 +254,7 @@ def main():
             }
 
     print(f"Processed {len(manifest_entries)} cmdlets across {len(modules_data)} modules")
+    require_cmdlets('az', len(manifest_entries))
 
     # Write manifest.json
     manifest = {'v': version, 'd': manifest_entries}

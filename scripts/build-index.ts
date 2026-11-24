@@ -5,7 +5,7 @@
 // Everything written here is typed against src/app/types.ts, which the app reads it as.
 import { readFile, writeFile, readdir, mkdir, rm, rename } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join, basename, dirname } from 'node:path';
+import { join, basename, dirname, relative } from 'node:path';
 import { existsSync } from 'node:fs';
 import { artifactPath } from '../src/app/artifacts.ts';
 import type { CmdletDetail, CmdletFile, DocumentedParam, IndexShard, SourceMeta } from '../src/app/types.ts';
@@ -46,7 +46,15 @@ type RawParam = { name: string; type: string; required: boolean; description?: s
 /** One index row, before it is split into columns. */
 interface Row { n: string; v: string; m: string; c: string; f: string; x: string; p: number; e: boolean; desc: string }
 
-const readJson = async (p: string): Promise<unknown> => JSON.parse(await readFile(p, 'utf8'));
+/** A data file's JSON; a parse error names the file (relative to the repo), of the hundreds the build reads. */
+async function readJson(p: string): Promise<unknown> {
+  const text = await readFile(p, 'utf8');
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`${relative(ROOT, p)}: ${(e as Error).message}`);
+  }
+}
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isStringRecord = (v: unknown): v is Record<string, string> => isObject(v) && Object.values(v).every((x) => typeof x === 'string');
 const clip = (s: string) => {
@@ -58,6 +66,23 @@ const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) =
 const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) =>
   isObject(x) && typeof x.name === 'string' && typeof x.type === 'string' && typeof x.required === 'boolean' && (x.description === undefined || typeof x.description === 'string'));
 
+/**
+ * Prose from the docs as the reader should see it: line breaks the docs left as literal text
+ * ("list:\\r- item") become spaces, whitespace collapses, and template placeholders ("{{ Fill in
+ * the Synopsis }}") or stray markdown headings ("## SYNTAX") count as no text at all. A word that
+ * is a Windows or UNC path ("C:\\reports", "\\\\server\\new") keeps its backslashes.
+ */
+function cleanText(s: string): string {
+  const t = s
+    .replace(/\S*\\[rn]\S*/g, (word) => (/(?:^|[^A-Za-z])[A-Za-z]:\\[\w.$]{2}|^\\\\/.test(word) ? word : word.replace(/\\[rn]/g, ' ')))
+    .replace(/\s+/g, ' ')
+    .trim();
+  return /^\{\{.*\}\}$/.test(t) || /^#+\s/.test(t) ? '' : t;
+}
+
+/** An example that is only the docs template's placeholder ("PS C:\\> {{ Add example code here }}") is no example. */
+const isPlaceholder = (x: string) => /^\{\{[\s\S]*\}\}$/.test(x.replace(/^PS [^>\n]*>\s*/gm, '').trim());
+
 /** The detail shape the app reads: every field present, so the UI never guesses. */
 function normalizeCmdlet(where: string, raw: unknown, description: string): CmdletDetail {
   if (!isObject(raw)) throw new Error(`${where}: not an object`);
@@ -68,10 +93,10 @@ function normalizeCmdlet(where: string, raw: unknown, description: string): Cmdl
   if (c.parameters !== undefined && !params(c.parameters)) throw new Error(`${where}: parameters are not {name, type, required, description?}`);
   return {
     syntax: c.syntax,
-    examples: c.examples.filter((x) => x.trim()), // pipelines can leave blank example blocks
+    examples: c.examples.filter((x) => x.trim() && !isPlaceholder(x)), // pipelines can leave blank or template example blocks
     permissions: c.permissions ?? [], // only Graph and Entra document permissions
     // Only MECM documents parameters separately.
-    parameters: (c.parameters ?? []).map((p): DocumentedParam => ({ ...p, description: p.description ?? '' })),
+    parameters: (c.parameters ?? []).map((p): DocumentedParam => ({ ...p, description: cleanText(p.description ?? '') })),
     description, // descriptions.json is the one source, as for the index row
   };
 }
@@ -88,7 +113,8 @@ function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, Map
   const fail = (what: string): never => { throw new Error(`${src.id} manifest, ${name || JSON.stringify(raw)}: ${what}`); };
   const str = (k: string) => { const v = r[k]; return typeof v === 'string' ? v : fail(`${k} is not a string`); };
   if (!name) fail('n (name) is not a string');
-  const m = r.m === undefined && src.module ? src.module : str('m');
+  // A one-module source's rows may name its module, but never another one.
+  const m = src.module ? (r.m === undefined || r.m === src.module ? src.module : fail(`module ${String(r.m)} is not ${src.module}`)) : str('m');
   if (!m) fail('no module');
   const held = holders.get(name) ?? new Map<string, CmdletDetail>();
   const files = [...held.keys()].sort();
@@ -118,8 +144,9 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[];
   const dir = join(DATA, src.id);
   const manifest = await readJson(join(dir, 'manifest.json'));
   if (!isObject(manifest)) throw new Error(`${src.id} manifest: not an object`);
-  const descriptions = await readJson(join(dir, 'descriptions.json'));
-  if (!isStringRecord(descriptions)) throw new Error(`${src.id} descriptions: not an object of strings`);
+  const rawDescriptions = await readJson(join(dir, 'descriptions.json'));
+  if (!isStringRecord(rawDescriptions)) throw new Error(`${src.id} descriptions: not an object of strings`);
+  const descriptions = Object.fromEntries(Object.entries(rawDescriptions).map(([n, d]) => [n, cleanText(d)]));
   // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
   const holders = new Map<string, Map<string, CmdletDetail>>(); // name -> module file -> entry
   const fileVersions = new Map<string, string>(); // module file -> its module's version ('' when unknown)
@@ -144,6 +171,20 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[];
   // pipelines/common.py source_version guarantees a version; anything else is a broken manifest.
   if (typeof version !== 'string' || !version) throw new Error(`${src.id} manifest: v is not a version string`);
   const rows = manifest.d.map((r) => parseManifestRow(src, r, holders, descriptions));
+  // The manifest lists each cmdlet of each module once, and every cmdlet in a module file.
+  const listed = new Set<string>();
+  for (const r of rows) {
+    const key = `${r.n}@${r.m}`;
+    if (listed.has(key)) throw new Error(`${src.id} manifest: ${r.n} (${r.m}) is listed twice`);
+    listed.add(key);
+  }
+  const indexed = new Set(rows.map((r) => r.n));
+  const unlisted = [...holders.keys()].filter((n) => !indexed.has(n));
+  if (unlisted.length) throw new Error(`${src.id}: ${unlisted.length} cmdlets in module files have no manifest row (e.g. ${unlisted.slice(0, 3).join(', ')})`);
+  // And every module file is some row's: a file no row opens would be published for nothing.
+  const used = new Set(rows.map((r) => r.f));
+  const unused = [...fileVersions.keys()].filter((f) => !used.has(f));
+  if (unused.length) throw new Error(`${src.id}: module files no manifest row points to: ${unused.join(', ')}`);
   return { version, rows: rows.sort((a, b) => a.n.localeCompare(b.n)), fileVersions };
 }
 
@@ -182,7 +223,7 @@ function buildShard(rows: Row[], fileVersions: Map<string, string>): { index: In
 async function checkRegistries() {
   const ids = SOURCES.map((s) => s.id).sort().join(',');
   const dirs = async (root: string, marker?: string) => (await readdir(root, { withFileTypes: true }))
-    .filter((d) => d.isDirectory())
+    .filter((d) => d.isDirectory() && !d.name.startsWith('.')) // editor and OS folders (.cache, .idea) are no source
     .map((d) => d.name)
     .filter((name) => !marker || existsSync(join(root, name, marker)))
     .sort().join(',');
@@ -196,7 +237,8 @@ async function checkRegistries() {
 async function main() {
   const t0 = Date.now();
   await checkRegistries();
-  await rm(OUT, { recursive: true, force: true });
+  // Stage the new build beside the current one; the current one stays until this one succeeds.
+  await rm(STAGE, { recursive: true, force: true });
   const sources: SourceMeta[] = [];
   for (const src of SOURCES) {
     const { version, rows, fileVersions } = await loadRows(src);
@@ -211,7 +253,11 @@ async function main() {
   const total = sources.reduce((a, s) => a + s.count, 0);
   // The id is bundled into the page and the worker, which fetch only /a/<build>/… (sources.ts assetUrl).
   const build = hash.digest('hex').slice(0, 12);
-  await rename(STAGE, join(OUT, build));
+  // Put the new build in place first, then drop the others: at no point is there no usable build.
+  // (Unchanged data hashes the same, so this build may already be there.)
+  if (existsSync(join(OUT, build))) await rm(STAGE, { recursive: true, force: true });
+  else await rename(STAGE, join(OUT, build));
+  for (const old of await readdir(OUT)) if (old !== build) await rm(join(OUT, old), { recursive: true, force: true });
   await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ build, total, sources }, null, 2) + '\n');
   console.log(`  ${total} cmdlets indexed in ${Date.now() - t0} ms`);
 }

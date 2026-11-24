@@ -87,7 +87,9 @@ async function loadAll(): Promise<Loaded[]> {
     const loaded = prepareSource(si, id, shard);
     try {
       setDescriptions(loaded, await readJson<string[]>(artifactPath.desc(id)));
-    } catch { /* names still search, as in the worker */ }
+    } catch {
+      setDescriptions(loaded, null); // names still search, as in the worker
+    }
     all.push(loaded);
   }
   return all;

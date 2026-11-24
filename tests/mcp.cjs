@@ -1,4 +1,7 @@
-// HTTP checks for the stateless MCP endpoint. e2e.cjs calls runMcp while astro preview is up.
+// HTTP checks for the stateless MCP endpoint against the built Node server.
+//   npm run build && node tests/mcp.cjs
+// The browser suite serves dist/ as static files and cannot answer /mcp.
+const { spawn } = require('node:child_process');
 const ACCEPT = 'application/json, text/event-stream';
 
 async function rpc(base, id, method, params, extraHeaders = {}) {
@@ -104,3 +107,36 @@ async function runMcp(base, check) {
 }
 
 module.exports = { runMcp };
+
+if (require.main === module) {
+  const PORT = 4408;
+  const BASE = `http://127.0.0.1:${PORT}`;
+  const child = spawn(process.execPath, ['dist/server/entry.mjs'], {
+    env: { ...process.env, HOST: '127.0.0.1', PORT: String(PORT) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', (chunk) => { log += chunk; });
+  child.stderr.on('data', (chunk) => { log += chunk; });
+  const results = [];
+  const check = (ok, name, detail = '') => results.push({ ok: !!ok, name, detail });
+  (async () => {
+    try {
+      for (let i = 0; i < 80; i++) {
+        if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}\n${log.slice(-800)}`);
+        try { if ((await fetch(BASE)).ok) break; } catch { /* not up yet */ }
+        if (i === 79) throw new Error(`server did not start\n${log.slice(-800)}`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      await runMcp(BASE, check);
+    } catch (e) {
+      check(false, 'mcp harness', e.message.split('\n')[0]);
+    } finally {
+      child.kill('SIGTERM');
+    }
+    for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? `  (${r.detail})` : ''}`);
+    const failed = results.filter((r) => !r.ok).length;
+    console.log(`\n${results.length - failed}/${results.length} passed`);
+    process.exit(failed ? 1 : 0);
+  })();
+}
