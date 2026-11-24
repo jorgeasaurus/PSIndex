@@ -247,7 +247,7 @@ function Search() {
           {/* Above the results, so it shows at every width (narrow screens hide the detail pane). */}
           {missing && (
             <div class="notice notice-error notice-link" role="status">
-              <p>The linked cmdlet <code>{missing}</code> isn’t in the index. It may have been renamed or removed.</p>
+              <p>The link names <code>{missing}</code>, which isn’t a cmdlet in the index. The link may be cut off or mistyped, or the cmdlet renamed or removed.</p>
               <button type="button" class="chip" onClick={() => { close(); inputRef.current?.focus(); }}>Dismiss</button>
             </div>
           )}
