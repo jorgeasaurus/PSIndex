@@ -95,7 +95,15 @@ export function McpPanel() {
         aria-modal="true"
         // The page's own Escape handler would preventDefault and stop the dialog from closing.
         onKeyDown={(e) => { if (e.key === 'Escape') e.stopPropagation(); }}
-        onClick={(e) => { if (e.target === e.currentTarget) ref.current?.close(); }}
+        onClick={(e) => {
+          const el = ref.current;
+          if (!el || e.target !== el) return;
+          // A backdrop click targets the dialog but lands outside its box. The scrollbar is the
+          // same target, and that point is inside the box, so it must stay open.
+          const r = el.getBoundingClientRect();
+          const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+          if (!inside) el.close();
+        }}
       >
         <div class="mcp-head">
           <h2 id="mcp-title">Use with AI agents</h2>

@@ -587,6 +587,17 @@ const scenarios = [
 
       await p.click(openBtn);
       await p.waitForSelector('#mcp-panel[open]');
+      // A scrollbar click targets the scroller and lands inside its box. That must not dismiss.
+      const insideStays = await p.evaluate(() => {
+        const el = document.querySelector('#mcp-panel');
+        const scroller = el.querySelector('.mcp-body');
+        const r = scroller.getBoundingClientRect();
+        scroller.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.right - 3, clientY: r.top + 80 }));
+        const box = el.getBoundingClientRect();
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: box.right - 3, clientY: box.top + box.height / 2 }));
+        return el.open;
+      });
+      check(insideStays, 'a click inside the dialog, including its scrollbar, keeps it open');
       const box = await p.locator('#mcp-panel').boundingBox();
       await p.mouse.click(box.x - 8, box.y + 24);
       await p.waitForFunction(() => !document.querySelector('#mcp-panel')?.open);
