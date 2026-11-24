@@ -185,9 +185,9 @@ function Search() {
    * from a deep link (?c=…) or from a window narrowed with an entry open lands on the list.
    */
   const pushDialogEntry = () => {
-    const here = location.pathname + location.search;
     history.replaceState(history.state, '', urlOf({ ...urlNow.current, open: '' }));
-    history.pushState({ ...history.state, [DIALOG_ENTRY]: true }, '', here);
+    // The state being rendered, not location: the URL effect that names the entry runs later.
+    history.pushState({ ...history.state, [DIALOG_ENTRY]: true }, '', urlOf(urlNow.current));
   };
   /** A history.back() we started. Its popstate restores the URL and must not close the entry. */
   const dropping = useRef(false);

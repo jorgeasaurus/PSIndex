@@ -843,8 +843,12 @@ const scenarios = [
       await p.goto(`${BASE}/?q=user`);
       await rowsReady(p);
       await p.click('.result');
-      await p.waitForSelector('.app[data-open]');
-      const c = param(p, 'c');
+      // Read in the same task that sees the dialog: its history entry must name it already.
+      const c = await p.evaluate(() => new Promise((done) => {
+        const look = () => (document.querySelector('.app[data-open]') ? done(new URLSearchParams(location.search).get('c')) : requestAnimationFrame(look));
+        look();
+      }));
+      check(!!c, 'the dialog history entry names the entry as soon as it shows', String(c));
       await p.goBack();
       await p.waitForFunction(() => !document.querySelector('.app[data-open]'));
       await p.goForward();
