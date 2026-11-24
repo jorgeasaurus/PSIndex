@@ -12,8 +12,9 @@
     "preview": "astro preview",
     "test:e2e": "node tests/e2e.cjs",
     "test:mcp": "node tests/mcp.cjs",
+    "test:pipelines": "python3 -m unittest discover -s pipelines/tests",
     "typecheck": "tsc --noEmit -p .",
-    "verify": "npm run build && npm run typecheck && playwright install --with-deps chromium && npm run test:e2e && npm run test:mcp"
+    "verify": "npm run build && npm run typecheck && playwright install --with-deps chromium && npm run test:e2e && npm run test:mcp && npm run test:pipelines"
   },
   "dependencies": {
     "@astrojs/node": "^11.1.14",

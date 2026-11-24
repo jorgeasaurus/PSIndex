@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: "Comma-separated sources to refresh (ids of pipelines/<id>/source.env) or 'all'"
+        description: "Sources to refresh, separated by commas or spaces (ids of pipelines/<id>/source.env), or 'all'"
         default: all
 
 # One run at a time; a run started meanwhile waits. GitHub keeps one waiting run per group, so a
@@ -40,10 +40,11 @@ jobs:
         run: |
           # Every pipelines/<source>/source.env is a source (build-index checks this matches SOURCES).
           known=$(ls pipelines/*/source.env | cut -d/ -f2 | paste -sd, -)
-          want=$(printf '%s' "$WANT" | tr 'A-Z' 'a-z' | tr -d '[:space:]')
-          if [ -z "$want" ] || [ "$want" = "all" ]; then want="$known"; fi
-          sources=$(jq -cn --arg w "$want" --arg k "$known" '($k | split(",")) as $known
-            | ($w | split(",") | map(select(length > 0)) | unique) as $want
+          # Ids may be separated by commas and/or any whitespace ("az mecm", one per line). Blank or
+          # 'all' means every source; ' , ' has no ids and fails.
+          sources=$(jq -cn --arg w "$WANT" --arg k "$known" '($k | split(",")) as $known
+            | ([$w | ascii_downcase | splits("[,\\s]+") | select(length > 0)] | unique) as $ids
+            | (if ($w | test("^\\s*$")) or $ids == ["all"] then $known else $ids end) as $want
             | ($want - $known) as $unknown
             | if ($unknown | length) > 0 then error("unknown sources: \($unknown | join(", ")); known: \($known | join(", "))")
               elif ($want | length) == 0 then error("no sources given; known: \($known | join(", "))")
@@ -104,35 +105,44 @@ jobs:
         with:
           path: refreshed
 
+      # Decide here, before the long verify, whether the refresh changed anything: most daily runs
+      # find upstream unchanged and stop at this step.
       - name: Apply refreshed sources
         id: apply
         shell: bash
         run: |
           shopt -s nullglob
-          any=false
+          applied=false
           for dir in refreshed/data-*; do
             src="${dir#refreshed/data-}"
             rm -rf "data/$src" && mkdir -p "data/$src" && cp -r "$dir"/. "data/$src/"
             echo "applied $src"
-            any=true
+            applied=true
           done
-          if [ "$any" = false ]; then echo "::warning::No source refreshed cleanly; nothing to commit."; fi
-          echo "any=$any" >> "$GITHUB_OUTPUT"
+          changed=false
+          if [ "$applied" = false ]; then
+            echo "::warning::No source refreshed cleanly; nothing to commit."
+          elif [ -z "$(git status --porcelain -- data)" ]; then
+            echo "::notice::Refreshed data is identical to ${GITHUB_REF_NAME}; skipping the build, tests and commit."
+          else
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       # The push below uses GITHUB_TOKEN, which does not trigger ci.yml, yet Vercel deploys it.
       # So the combined refreshed data passes the same gate as a PR (npm run verify, which ci.yml
       # runs too); if upstream docs moved a cmdlet the suite relies on, nothing ships until fixed.
       - uses: actions/setup-node@v4
-        if: steps.apply.outputs.any == 'true'
+        if: steps.apply.outputs.changed == 'true'
         with:
           node-version: 22
           cache: npm
       - name: Build and test the refreshed site
-        if: steps.apply.outputs.any == 'true'
+        if: steps.apply.outputs.changed == 'true'
         run: npm ci && npm run verify
 
       - name: Commit
-        if: steps.apply.outputs.any == 'true'
+        if: steps.apply.outputs.changed == 'true'
         shell: bash
         # The bot identity for the commit.
         env:
@@ -143,7 +153,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           git add data
-          if git diff --cached --quiet; then echo "No data changes."; exit 0; fi
           changed=$(git diff --cached --name-only | cut -d/ -f2 | sort -u | paste -sd, -)
           git commit -m "chore(data): refresh ${changed}"
           # Push exactly the tree tested above. If main moved meanwhile the push is rejected (not a
