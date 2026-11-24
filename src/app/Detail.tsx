@@ -13,7 +13,7 @@ interface Props {
   client: SearchClient;
   onOpen: (r: Row) => void;
   onClose: () => void;
-  /** Move focus to the entry's title when it opens (the narrow-screen dialog). */
+  /** The entry is the narrow-screen dialog: its title takes focus when it opens or the window narrows. */
   takeFocus: boolean;
 }
 
@@ -22,11 +22,12 @@ export function Detail({ row, client, onOpen, onClose, takeFocus }: Props) {
   const src = sourceOf(row.source);
   const title = useRef<HTMLHeadingElement>(null);
 
-  // Focus the title when the entry is a dialog, or when the control that opened it is gone
-  // (a "Same noun" button belongs to the entry it replaces): focus would otherwise drop to <body>.
+  // Focus the title when the entry becomes a dialog (opened narrow, or the window narrowed: the
+  // control that had focus is now inert), or when the control that opened it is gone (a "Same noun"
+  // button belongs to the entry it replaces): focus would otherwise drop to <body>.
   useEffect(() => {
     if (takeFocus || document.activeElement === document.body) title.current?.focus({ preventScroll: true });
-  }, []);
+  }, [takeFocus]);
 
   useEffect(() => {
     let live = true;
@@ -170,11 +171,17 @@ function CmdletBody({ c }: { c: CmdletDetail }) {
 
       <section class="block">
         <h3>Examples</h3>
-        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} label={`Copy example ${i + 1}`} />) : <p class="h-sub">The docs have no example for this cmdlet. Start from the syntax above.</p>}
+        {examples.length ? examples.map((x, i) => <CodeBlock key={i} src={x} label={`Copy example ${i + 1}`} />) : <p class="h-sub">{noExample(sets.length > 0, params.length > 0)}</p>}
       </section>
     </>
   );
 }
+
+/** The no-example note points only to sections the entry has. */
+const noExample = (syntax: boolean, params: boolean) =>
+  syntax ? 'The docs have no example for this cmdlet. Start from the syntax above.'
+    : params ? 'The docs have no example for this cmdlet. Start from the parameters above.'
+      : 'The docs have no syntax or example for this cmdlet.';
 
 /** Names and types get word-boundary breaks, so a long one wraps readably when it must. */
 const renderTokens = (s: string) => tokenize(s).map((t, i) => (

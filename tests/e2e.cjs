@@ -52,6 +52,48 @@ const scenarios = [
     },
   },
   {
+    name: 'narrowing with an entry open moves focus into the dialog',
+    context: { viewport: { width: 1180, height: 820 } },
+    async run(p) {
+      await p.goto(`${BASE}/?q=user`);
+      await rowsReady(p);
+      await p.click('#result-0');
+      await p.waitForSelector('.detail-title');
+      await p.focus('input[type=search]');
+      await p.setViewportSize({ width: 820, height: 1180 });
+      await p.waitForFunction(() => document.querySelector('.pane-detail')?.getAttribute('role') === 'dialog');
+      await p.waitForFunction(() => document.activeElement?.id === 'detail-title');
+      check(true, 'the entry title has focus once the open entry becomes the dialog');
+    },
+  },
+  {
+    name: 'an entry with no syntax or example',
+    async run(p) {
+      await p.goto(`${BASE}/?c=exchange:Copy-CsVoicePolicy`);
+      await titleIs(p, 'Copy-CsVoicePolicy');
+      const note = await p.waitForSelector('.detail p.h-sub').then((e) => e.textContent());
+      check(!/above/.test(note), 'the no-example note points to no section the entry lacks', note);
+    },
+  },
+  {
+    name: 'filters that hide every match are named as the reason',
+    async run(p) {
+      await p.goto(`${BASE}/?s=graph&verb=Remove&q=get-mguser`);
+      const text = await p.waitForSelector('.empty .empty-title').then((e) => e.textContent());
+      check(/filters hide/.test(text) && !/No match/.test(text), 'the empty state says the filters hide the matches', text);
+      check(!(await p.$('.empty button:has-text("Search mguser")')), 'no noun hint when the query does match');
+      await p.click('.empty button:has-text("Clear filters")');
+      await topIs(p, 'Get-MgUser');
+      await p.goto(`${BASE}/?s=graph&verb=Remove&q=zzqqxx`);
+      const none = await p.waitForSelector('.empty .empty-title').then((e) => e.textContent());
+      check(/^No match/.test(none), 'a query with no match anywhere still says no match', none);
+      // A misspelling found only by typo matching is no claim that the filters hide real matches.
+      await p.goto(`${BASE}/?s=graph&verb=Remove&q=get-mgusrr`);
+      const typo = await p.waitForSelector('.empty .empty-title').then((e) => e.textContent());
+      check(/^No match/.test(typo), 'near misses are not counted as matches the filters hide', typo);
+    },
+  },
+  {
     name: '404 page icon',
     async run(p) {
       await p.goto(`${BASE}/404.html`);
@@ -392,6 +434,7 @@ const scenarios = [
         placeholder: document.querySelector('input[type=search]').placeholder,
       }));
       check(!band.clear && !band.kbd && band.tabs && band.placeholder === 'Index unavailable', 'a failed load offers no search actions in the band', JSON.stringify(band));
+      check(!(await p.$('.intro-keys')) && !(await p.$('.intro-samples')), 'a failed load shows no key legend or sample searches in the intro');
       await p.evaluate(() => document.activeElement?.blur());
       await p.keyboard.press('/');
       check(await p.evaluate(() => document.activeElement?.getAttribute('aria-label') !== 'Search cmdlets'), '"/" does not focus the read-only box after a failed load');

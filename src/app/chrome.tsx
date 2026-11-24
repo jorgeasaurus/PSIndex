@@ -232,17 +232,26 @@ function Select({ label, value, options, onChange }: { label: string; value: str
 /**
  * No results. `q` is the query ('' when it has no token). The hint comes from what was typed: a
  * command line pasted with its parameters or a pipeline offers its cmdlet name alone, a lone cmdlet name its
- * noun, several words fewer. No `onClearFilters`/`onSearchAll`: no filters are set, or the scope
- * is already every source.
+ * noun, several words fewer. When the query does match, only in cmdlets the filters hide (`hidden`),
+ * the filters are named as the reason instead. No `onClearFilters`/`onSearchAll`: no filters are
+ * set, or the scope is already every source.
  */
-export function EmptyState({ q, inLabel, descriptionsLoading, onSearch, onClearFilters, onSearchAll }: {
+export function EmptyState({ q, inLabel, hidden, descriptionsLoading, onSearch, onClearFilters, onSearchAll }: {
   q: string;
   inLabel: string;
+  hidden: number;
   descriptionsLoading: boolean;
   onSearch: (q: string) => void;
   onClearFilters?: () => void;
   onSearchAll?: () => void;
 }) {
+  const clearFilters = onClearFilters && <button type="button" class="chip" onClick={onClearFilters}>Clear filters</button>;
+  if (q && hidden) return (
+    <div class="empty">
+      <p class="empty-title">“{q}” matches {formatCount(hidden)} {hidden === 1 ? 'cmdlet' : 'cmdlets'}{inLabel}, but the filters hide {hidden === 1 ? 'it' : 'them all'}.</p>
+      {clearFilters}
+    </div>
+  );
   // Descriptions load after names; until then a query that only a description matches finds nothing yet.
   if (q && descriptionsLoading) return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
   const words = queryWords(q);
@@ -254,7 +263,7 @@ export function EmptyState({ q, inLabel, descriptionsLoading, onSearch, onClearF
       {name && name !== words.join(' ') ? <><p>A search matches cmdlet names, not whole command lines. Search the cmdlet name alone:</p>{suggest(name)}</>
         : name ? <><p>Try the noun alone:</p>{suggest(name.slice(name.indexOf('-') + 1))}</>
         : words.length > 1 && <p>Try fewer words.</p>}
-      {onClearFilters && <button type="button" class="chip" onClick={onClearFilters}>Clear filters</button>}
+      {clearFilters}
       {onSearchAll && <button type="button" class="chip" onClick={onSearchAll}>Search all cmdlets</button>}
     </div>
   );
@@ -280,7 +289,10 @@ export function LoadFailed({ message }: { message: string }) {
   );
 }
 
-/** No `onPick` (the shell, a failed load): the example searches can't run, so they aren't offered. */
+/**
+ * No `onPick` (the shell, a failed load): the example searches can't run, so they aren't offered,
+ * and neither is the key legend (no key acts on a search that can't run).
+ */
 export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void }) {
   return (
     <div class="intro">
@@ -305,7 +317,7 @@ export function Intro({ onPick }: { onPick?: (s: SourceId, q: string) => void })
           </div>
         ))}
       </dl>
-      <p class="intro-keys"><kbd>/</kbd> search <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>
+      {onPick && <p class="intro-keys"><kbd>/</kbd> search <kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>}
     </div>
   );
 }

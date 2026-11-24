@@ -91,6 +91,8 @@ export interface Results {
   q: string;
   refs: Int32Array;
   facets: Facets;
+  /** Matches of the query that the filters hide, counted only when they hide every one (else 0). */
+  hidden: number;
   ms: number;
   /** Whether descriptions were searched too. While they load the search re-runs once they arrive. */
   descriptions: Descriptions;

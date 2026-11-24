@@ -163,13 +163,19 @@ function filterOf(L: Loaded, f: Filters): (i: number) => boolean {
 export interface Hit { ref: number; score: number; len: number }
 
 /** Ranked hits for one query. No query matches everything, in index order, as the page does. */
-export function searchHits(all: Loaded[], q: string, filters: Filters): Hit[] {
+/**
+ * The query's hits under the filters, best first. With `literal`, a token that matches nothing
+ * literally gives no hits instead of falling back to typo matching: "the query matches N cmdlets"
+ * must not count near misses.
+ */
+export function searchHits(all: Loaded[], q: string, filters: Filters, { literal = false } = {}): Hit[] {
   const tokens = queryTokens(q);
   const { sources } = scopeOf(filters.source);
   const scope = all.filter((L) => sources.some((s) => s.id === L.id)).map((L) => ({ L, passes: filterOf(L, filters) }));
   // A token with any literal hit in scope (under the filters) matches literally; one with none is
   // read as a typo. Typo matches never mix with real ones, so an exact name isn't buried in near misses.
   const typo = tokens.map((t) => !scope.some(({ L, passes }) => L.shard.n.some((_, i) => passes(i) && literalScore(t, L, i) > 0)));
+  if (literal && typo.some(Boolean)) return [];
   const hits: Hit[] = [];
   for (const { L, passes } of scope) {
     for (let i = 0; i < L.shard.n.length; i++) {

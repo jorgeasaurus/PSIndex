@@ -355,6 +355,7 @@ function Search() {
                 q={searchText(q)}
                 descriptionsLoading={results?.descriptions.loading ?? true}
                 inLabel={scope.inLabel}
+                hidden={results?.hidden ?? 0}
                 onSearch={searchFor}
                 // Clearing the filters keeps the source the user picked; leaving it is a separate choice.
                 onClearFilters={filterCount ? () => { clearFilters(); inputRef.current?.focus(); } : undefined}
