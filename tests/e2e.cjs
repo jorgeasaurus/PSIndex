@@ -1,7 +1,9 @@
 // End-to-end behaviour checks against a built site.
-//   npm run build && node tests/e2e.cjs        (starts `astro preview` itself)
+//   npm run build && node tests/e2e.cjs
+// Serves dist/ itself on its own port (it never touches a running `astro preview`).
 // Needs Playwright with Chromium available (`npx playwright install chromium`).
-const { spawn } = require('node:child_process');
+const http = require('node:http');
+const sirv = require('sirv');
 const { chromium } = require('playwright');
 const { total, build } = require('../src/sources.generated.json');
 const BUILD_PATH = `/a/${build}/`;
@@ -11,13 +13,6 @@ const BASE = `http://localhost:${PORT}`;
 const results = [];
 const check = (ok, name, detail = '') => results.push({ ok: !!ok, name, detail });
 
-async function waitForServer() {
-  for (let i = 0; i < 60; i++) {
-    try { if ((await fetch(BASE)).ok) return; } catch {}
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error('preview server did not start');
-}
 
 const TOTAL_LABEL = `${total.toLocaleString('en-US')} results`;
 const param = (p, k) => new URL(p.url()).searchParams.get(k);
@@ -113,7 +108,7 @@ const scenarios = [
       const mark = await p.$eval('.result .result-name mark', (m) => m.textContent).catch(() => '');
       check(mark === 'Get-MgUser', 'a hyphenless match is highlighted', mark);
       await p.fill('input[type=search]', '   ');
-      await p.waitForFunction(() => document.querySelector('.count')?.textContent?.startsWith('40,931'));
+      await p.waitForFunction((t) => document.querySelector('.count')?.textContent?.startsWith(t), TOTAL_LABEL);
       const label = await p.textContent('.count');
       check(!label.includes('ms') && !param(p, 'q'), 'a blank query is no query (no timing, no q in the URL)', `${label} ${p.url()}`);
       await p.goto(`${BASE}/?s=graph&verb=Frobnicate`);
@@ -424,22 +419,18 @@ async function runScenario(browser, sc) {
   }
 }
 
-// `astro preview --background` starts a single daemon and returns: stop any running one, start ours, stop it after.
-const astro = (...args) => new Promise((res) => spawn('npx', ['astro', 'preview', ...args], { stdio: 'ignore' }).on('exit', res));
-
 (async () => {
-  await astro('stop');
-  await astro('--port', String(PORT), '--background');
+  const server = http.createServer(sirv('dist', { dev: true }));
+  await new Promise((res, rej) => server.once('error', rej).listen(PORT, res));
   let browser;
   try {
-    await waitForServer();
     browser = await chromium.launch();
     for (const sc of scenarios) await runScenario(browser, sc);
   } catch (e) {
     check(false, 'harness', e.message);
   } finally {
     await browser?.close();
-    await astro('stop');
+    server.close();
   }
   for (const r of results) console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? `  (${r.detail})` : ''}`);
   const failed = results.filter((r) => !r.ok).length;

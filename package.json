@@ -2,6 +2,9 @@
   "name": "psindex",
   "version": "1.0.0",
   "description": "One searchable index of Microsoft Graph, Az, Entra, Exchange and MECM PowerShell cmdlets.",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "index": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/build-index.ts",
     "dev": "npm run index && astro dev",
@@ -24,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^22.20.5",
     "playwright": "1.63.0",
+    "sirv": "^3.0.2",
     "typescript": "6.0.2"
   }
 }

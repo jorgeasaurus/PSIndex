@@ -59,6 +59,16 @@ const params = (v: unknown): v is RawParam[] => Array.isArray(v) && v.every((x) 
   isObject(x) && typeof x.name === 'string' && typeof x.type === 'string' && typeof x.required === 'boolean' && (x.description === undefined || typeof x.description === 'string'));
 
 /** The detail shape the app reads: every field present, so the UI never guesses. */
+/**
+ * Prose from the docs as the reader should see it: escape sequences the docs left as literal text
+ * ("\\r", "\\n") become spaces, whitespace collapses, and template placeholders ("{{ Fill in the
+ * Synopsis }}") or stray markdown headings ("## SYNTAX") count as no text at all.
+ */
+function cleanText(s: string): string {
+  const t = s.replace(/\\[rnt]/g, ' ').replace(/\s+/g, ' ').trim();
+  return /^\{\{.*\}\}$/.test(t) || /^#+\s/.test(t) ? '' : t;
+}
+
 function normalizeCmdlet(where: string, raw: unknown, description: string): CmdletDetail {
   if (!isObject(raw)) throw new Error(`${where}: not an object`);
   const c = raw;
@@ -71,7 +81,7 @@ function normalizeCmdlet(where: string, raw: unknown, description: string): Cmdl
     examples: c.examples.filter((x) => x.trim()), // pipelines can leave blank example blocks
     permissions: c.permissions ?? [], // only Graph and Entra document permissions
     // Only MECM documents parameters separately.
-    parameters: (c.parameters ?? []).map((p): DocumentedParam => ({ ...p, description: p.description ?? '' })),
+    parameters: (c.parameters ?? []).map((p): DocumentedParam => ({ ...p, description: cleanText(p.description ?? '') })),
     description, // descriptions.json is the one source, as for the index row
   };
 }
@@ -88,7 +98,8 @@ function parseManifestRow(src: SourceDef, raw: unknown, holders: Map<string, Map
   const fail = (what: string): never => { throw new Error(`${src.id} manifest, ${name || JSON.stringify(raw)}: ${what}`); };
   const str = (k: string) => { const v = r[k]; return typeof v === 'string' ? v : fail(`${k} is not a string`); };
   if (!name) fail('n (name) is not a string');
-  const m = r.m === undefined && src.module ? src.module : str('m');
+  // A one-module source's rows may name its module, but never another one.
+  const m = src.module ? (r.m === undefined || r.m === src.module ? src.module : fail(`module ${String(r.m)} is not ${src.module}`)) : str('m');
   if (!m) fail('no module');
   const held = holders.get(name) ?? new Map<string, CmdletDetail>();
   const files = [...held.keys()].sort();
@@ -118,8 +129,9 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[];
   const dir = join(DATA, src.id);
   const manifest = await readJson(join(dir, 'manifest.json'));
   if (!isObject(manifest)) throw new Error(`${src.id} manifest: not an object`);
-  const descriptions = await readJson(join(dir, 'descriptions.json'));
-  if (!isStringRecord(descriptions)) throw new Error(`${src.id} descriptions: not an object of strings`);
+  const rawDescriptions = await readJson(join(dir, 'descriptions.json'));
+  if (!isStringRecord(rawDescriptions)) throw new Error(`${src.id} descriptions: not an object of strings`);
+  const descriptions = Object.fromEntries(Object.entries(rawDescriptions).map(([n, d]) => [n, cleanText(d)]));
   // A name can live in several module files (Entra v1.0 + beta, Teams + Skype, Az.PostgreSql + Az.PostgreSqlFlexibleServer).
   const holders = new Map<string, Map<string, CmdletDetail>>(); // name -> module file -> entry
   const fileVersions = new Map<string, string>(); // module file -> its module's version ('' when unknown)
@@ -144,6 +156,16 @@ async function loadRows(src: SourceDef): Promise<{ version: string; rows: Row[];
   // pipelines/common.py source_version guarantees a version; anything else is a broken manifest.
   if (typeof version !== 'string' || !version) throw new Error(`${src.id} manifest: v is not a version string`);
   const rows = manifest.d.map((r) => parseManifestRow(src, r, holders, descriptions));
+  // The manifest lists each cmdlet of each module once, and every cmdlet in a module file.
+  const listed = new Set<string>();
+  for (const r of rows) {
+    const key = `${r.n}@${r.m}`;
+    if (listed.has(key)) throw new Error(`${src.id} manifest: ${r.n} (${r.m}) is listed twice`);
+    listed.add(key);
+  }
+  const indexed = new Set(rows.map((r) => r.n));
+  const unlisted = [...holders.keys()].filter((n) => !indexed.has(n));
+  if (unlisted.length) throw new Error(`${src.id}: ${unlisted.length} cmdlets in module files have no manifest row (e.g. ${unlisted.slice(0, 3).join(', ')})`);
   return { version, rows: rows.sort((a, b) => a.n.localeCompare(b.n)), fileVersions };
 }
 
@@ -196,7 +218,8 @@ async function checkRegistries() {
 async function main() {
   const t0 = Date.now();
   await checkRegistries();
-  await rm(OUT, { recursive: true, force: true });
+  // Stage the new build beside the current one; the current one stays until this one succeeds.
+  await rm(STAGE, { recursive: true, force: true });
   const sources: SourceMeta[] = [];
   for (const src of SOURCES) {
     const { version, rows, fileVersions } = await loadRows(src);
@@ -211,6 +234,8 @@ async function main() {
   const total = sources.reduce((a, s) => a + s.count, 0);
   // The id is bundled into the page and the worker, which fetch only /a/<build>/… (sources.ts assetUrl).
   const build = hash.digest('hex').slice(0, 12);
+  // Swap in: drop every other build (this one may already exist: unchanged data, same hash).
+  for (const old of await readdir(OUT)) if (old !== '.staging') await rm(join(OUT, old), { recursive: true, force: true });
   await rename(STAGE, join(OUT, build));
   await writeFile(join(ROOT, 'src', 'sources.generated.json'), JSON.stringify({ build, total, sources }, null, 2) + '\n');
   console.log(`  ${total} cmdlets indexed in ${Date.now() - t0} ms`);

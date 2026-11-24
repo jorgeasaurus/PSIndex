@@ -17,12 +17,11 @@ import json
 import os
 import re
 import sys
-import urllib.request
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from common import output_dir, source_version
+from common import gallery_latest_version, output_dir, require_cmdlets, source_version, syntax_from
 
 # -- Category mapping (module suffix -> display category) --
 CATEGORY_MAP = [
@@ -38,7 +37,6 @@ CATEGORY_MAP = [
     ("Users", "User Management"),
 ]
 
-MAX_DESCRIPTION_LEN = 300
 MAX_EXAMPLES = 3
 
 
@@ -98,12 +96,6 @@ def extract_synopsis(section: str) -> str:
         if stripped:
             lines.append(stripped)
     return " ".join(lines)
-
-
-def extract_first_code_block(section: str) -> str:
-    """Extract the first fenced code block from a section."""
-    m = re.search(r"```[^\n]*\n(.*?)```", section, re.DOTALL)
-    return m.group(1).strip() if m else ""
 
 
 def extract_permissions(section: str) -> list:
@@ -187,12 +179,10 @@ def parse_cmdlet_file(filepath, module_name, api_version):
     description = extract_synopsis(synopsis_section)
     if not description:
         description = "Microsoft Entra PowerShell cmdlet."
-    if len(description) > MAX_DESCRIPTION_LEN:
-        description = description[: MAX_DESCRIPTION_LEN - 3] + "..."
 
-    # SYNTAX -> first code block
+    # SYNTAX -> every parameter set
     syntax_section = extract_section(text, "SYNTAX")
-    syntax = extract_first_code_block(syntax_section)
+    syntax = syntax_from(syntax_section)
     if not syntax:
         syntax = f"{cmdlet_name} [parameters]"
 
@@ -219,50 +209,11 @@ def parse_cmdlet_file(filepath, module_name, api_version):
     }
 
 
-PSGALLERY_URL = (
-    "https://www.powershellgallery.com/api/v2/FindPackagesById()"
-    "?id='{}'"
-)
-
-
-def fetch_module_version(module_id: str) -> tuple:
-    """Fetch the latest version of a module from the PowerShell Gallery."""
-    url = PSGALLERY_URL.format(module_id)
-    try:
-        while url:
-            resp = urllib.request.urlopen(url, timeout=60)
-            body = resp.read().decode()
-            versions = re.findall(r"<d:Version>([^<]+)</d:Version>", body)
-            flags = re.findall(
-                r"<d:IsLatestVersion[^>]*>([^<]+)</d:IsLatestVersion>", body
-            )
-            for ver, flag in zip(versions, flags):
-                if flag == "true":
-                    return (module_id, ver)
-            # Follow pagination
-            next_match = re.search(
-                r'<link rel="next" href="([^"]+)"', body
-            )
-            url = next_match.group(1).replace("&amp;", "&") if next_match else None
-    except Exception:
-        pass
-    return (module_id, None)
-
-
 def fetch_all_module_versions(module_names: list) -> dict:
-    """Fetch latest versions for all modules concurrently with retries."""
+    """Latest PowerShell Gallery version of each module (None where the lookup failed)."""
     print(f"Fetching module versions from PowerShell Gallery ({len(module_names)} modules)...")
-    versions = {}
-    remaining = list(module_names)
-    for attempt in range(3):
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            for module_id, version in executor.map(fetch_module_version, remaining):
-                versions[module_id] = version
-        remaining = [m for m in remaining if not versions.get(m)]
-        if not remaining:
-            break
-        if attempt < 2:
-            print(f"  Retrying {len(remaining)} failed modules...")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        versions = dict(zip(module_names, executor.map(gallery_latest_version, module_names)))
     found = sum(1 for v in versions.values() if v)
     print(f"  Resolved {found}/{len(module_names)} module versions")
     return versions
@@ -309,6 +260,7 @@ def main():
 
     all_cmdlets = sorted(v1_cmdlets + beta_cmdlets, key=lambda c: c["name"])
     print(f"\nTotal: {len(all_cmdlets)} cmdlets")
+    require_cmdlets("entra", len(all_cmdlets))
 
     # Fetch module versions from PowerShell Gallery
     unique_modules = sorted(set(c["module"] for c in all_cmdlets))

@@ -42,6 +42,7 @@ npm run dev        # builds the index, then starts Astro on http://localhost:432
 npm run build      # index + static build into dist/
 npm run typecheck  # tsc (run after build or index, which generates src/sources.generated.json)
 npm run test:e2e   # browser checks against the built site (needs Playwright + Chromium)
+npm run verify     # build, typecheck and the browser checks: the gate CI and the data refresh run
 ```
 
 ## Refresh data locally
@@ -50,12 +51,12 @@ npm run test:e2e   # browser checks against the built site (needs Playwright + C
 
 ```bash
 bash pipelines/refresh.sh mecm
-python3 scripts/check-shrink.py mecm   # refuses a refresh that lost entries or its version
+python3 scripts/check-shrink.py mecm   # refuses a refresh that lost more than 10% of its entries
 ```
 
 `.github/workflows/update-data.yml` runs the same script daily for every source, or on demand from the Actions tab (input `sources`: `all` or e.g. `graph,mecm`). A new source needs `pipelines/<id>/` (a `parse_docs.py` and a `source.env`), its `data/<id>/`, and an entry in `SOURCES` in `scripts/build-index.ts`; the build fails if those three disagree.
 
-PowerShell alternatives that read installed modules instead of docs: `pipelines/az/get-azcmdlets.ps1`, `pipelines/mecm/get-mecmcmdlets.ps1`.
+A parser that finds no cmdlets fails the run. A source's version is the one found this run, else the last committed one (with a warning), else the run fails (`pipelines/common.py` `source_version`).
 
 ## Deploy
 
