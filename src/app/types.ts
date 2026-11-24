@@ -83,7 +83,15 @@ export interface Facets {
 }
 
 /** One search's answer; `id` is the search's, so a re-run of the same search keeps it. */
-export interface Results { id: number; q: string; refs: Int32Array; facets: Facets; ms: number }
+export interface Results {
+  id: number;
+  q: string;
+  refs: Int32Array;
+  facets: Facets;
+  ms: number;
+  /** Descriptions were searched too (false until they have loaded; the search then re-runs). */
+  described: boolean;
+}
 
 /** Request/reply pairs answered by the worker. */
 export interface Requests {

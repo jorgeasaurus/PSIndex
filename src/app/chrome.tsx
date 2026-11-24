@@ -126,7 +126,8 @@ function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label:
   const on = id === current;
   const ref = useRef<HTMLButtonElement>(null);
   // The tab strip scrolls sideways on narrow screens; keep the selected tab in view.
-  useEffect(() => { if (on) ref.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [on]);
+  // Centred, so it never sits under the strip's faded edges.
+  useEffect(() => { if (on) ref.current?.scrollIntoView({ block: 'nearest', inline: 'center' }); }, [on]);
   return (
     <button ref={ref} type="button" class={'source' + (on ? ' is-on' : '')} aria-pressed={on} style={srcStyle(id)} onClick={() => onPick(id)}>
       <span class="source-dot" aria-hidden="true" />
@@ -136,10 +137,11 @@ function SourceTab({ id, label, count, current, onPick }: { id: SourceId; label:
   );
 }
 
-export function Toolbar({ label, filterCount, showFilters, onToggleFilters }: { label: ComponentChildren; filterCount: number; showFilters: boolean; onToggleFilters: () => void }) {
+/** `label` is announced as it changes (the result count); `timing` is shown but not announced. */
+export function Toolbar({ label, timing, filterCount, showFilters, onToggleFilters }: { label: string; timing?: string; filterCount: number; showFilters: boolean; onToggleFilters: () => void }) {
   return (
     <div class="toolbar">
-      <span class="count" aria-live="polite">{label}</span>
+      <span class="count"><span aria-live="polite">{label}</span>{timing && <span class="ms" aria-hidden="true"> · {timing}</span>}</span>
       <button type="button" class={'chip' + (showFilters || filterCount ? ' is-on' : '')} aria-expanded={showFilters} aria-controls="filters" onClick={onToggleFilters}>
         <SlidersHorizontal size={14} /> Filters{filterCount ? <span class="chip-n">{filterCount}</span> : null}
       </button>
@@ -156,10 +158,11 @@ export function FilterBar({ facets, filters, extraLabel, setFilter, clear }: {
 }) {
   return (
     <div class="filters" id="filters">
-      {facets.verbs.length > 0 && <Select label="Verb" value={filters.verb} options={facets.verbs} onChange={(v) => setFilter('verb', v)} />}
-      {facets.modules.length > 1 && <Select label="Module" value={filters.module} options={facets.modules} onChange={(v) => setFilter('module', v)} />}
-      {facets.categories.length > 1 && <Select label="Category" value={filters.category} options={facets.categories} onChange={(v) => setFilter('category', v)} />}
-      {extraLabel && facets.extras.length > 1 && <Select label={extraLabel} value={filters.extra} options={facets.extras} onChange={(v) => setFilter('extra', v)} />}
+      {/* A facet with a single value narrows nothing, so it gets no control, unless a filter on it is active. */}
+      {(facets.verbs.length > 0 || filters.verb) && <Select label="Verb" value={filters.verb} options={facets.verbs} onChange={(v) => setFilter('verb', v)} />}
+      {(facets.modules.length > 1 || filters.module) && <Select label="Module" value={filters.module} options={facets.modules} onChange={(v) => setFilter('module', v)} />}
+      {(facets.categories.length > 1 || filters.category) && <Select label="Category" value={filters.category} options={facets.categories} onChange={(v) => setFilter('category', v)} />}
+      {extraLabel && (facets.extras.length > 1 || filters.extra) && <Select label={extraLabel} value={filters.extra} options={facets.extras} onChange={(v) => setFilter('extra', v)} />}
       <label class="check">
         <input type="checkbox" checked={filters.examples} onChange={(e) => setFilter('examples', (e.target as HTMLInputElement).checked)} />
         Has examples
@@ -175,13 +178,17 @@ function Select({ label, value, options, onChange }: { label: string; value: str
       <span>{label}</span>
       <select value={value} onChange={(e) => onChange((e.target as HTMLSelectElement).value)}>
         <option value="">Any</option>
+        {/* An active value this scope doesn't have (a stale link, a verb carried over from another source): still shown, so it can be cleared. */}
+        {value && !options.includes(value) && <option value={value}>{value} (none here)</option>}
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </label>
   );
 }
 
-export function EmptyState({ q, inLabel, filtered, reset }: { q: string; inLabel: string; filtered: boolean; reset: () => void }) {
+export function EmptyState({ q, inLabel, filtered, described, reset }: { q: string; inLabel: string; filtered: boolean; described: boolean; reset: () => void }) {
+  // Descriptions load after names; until then a query that only a description matches finds nothing yet.
+  if (q && !described) return <div class="empty" aria-busy="true"><p class="empty-title">No cmdlet name matches “{q}”{inLabel}. Searching descriptions…</p></div>;
   return (
     <div class="empty">
       <p class="empty-title">{q ? <>No match for “{q}”{inLabel}.</> : 'Nothing matches these filters.'}</p>

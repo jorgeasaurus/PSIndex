@@ -6,7 +6,7 @@ import { useTheme } from './theme';
 import { ResultList, ResultsSkeleton, type ListNav } from './ResultList';
 import { Detail } from './Detail';
 import { Band, EmptyState, FilterBar, Frame, INERT_BAND, Intro, LoadFailed, Toolbar } from './chrome';
-import { ALL, formatCount, scopeOf } from './sources';
+import { ALL, formatCount, queryTokens, scopeOf } from './sources';
 import { EMPTY_FILTERS, activeFilters, readUrl, writeUrl } from './url';
 import type { Facets, Filters, Results, Row } from './types';
 
@@ -186,7 +186,9 @@ function Search() {
     ? 'Index unavailable'
     : !results
       ? 'Loading index…'
-      : <>{formatCount(results.refs.length)} {results.refs.length === 1 ? 'result' : 'results'}{results.q ? <span class="ms"> · {results.ms < 1 ? '<1' : Math.round(results.ms)} ms</span> : null}</>;
+      : `${formatCount(results.refs.length)} ${results.refs.length === 1 ? 'result' : 'results'}`;
+  // Search time, for a real query only (a blank query lists everything).
+  const timing = results && !loadError && queryTokens(results.q).length ? `${results.ms < 1 ? '<1' : Math.round(results.ms)} ms` : undefined;
 
   return (
     <Frame
@@ -217,7 +219,7 @@ function Search() {
       }
       toolbar={
         <>
-          <Toolbar label={countLabel} filterCount={filterCount} showFilters={showFilters} onToggleFilters={() => setShowFilters((s) => !s)} />
+          <Toolbar label={countLabel} timing={timing} filterCount={filterCount} showFilters={showFilters} onToggleFilters={() => setShowFilters((s) => !s)} />
           {showFilters && (
             <FilterBar facets={results?.facets ?? NO_FACETS} filters={filters} extraLabel={scope.extraLabel} setFilter={setFilter} clear={() => setFilters({ ...EMPTY_FILTERS, source: filters.source })} />
           )}
@@ -233,7 +235,7 @@ function Search() {
             onOpen={openRow}
             onCursor={setActiveId}
             query={q}
-            empty={<EmptyState q={q} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => { setFilters(EMPTY_FILTERS); inputRef.current?.focus(); }} />}
+            empty={<EmptyState q={q.trim()} described={!!results?.described} inLabel={scope.inLabel} filtered={filterCount > 0 || filters.source !== ALL.id} reset={() => { setFilters(EMPTY_FILTERS); inputRef.current?.focus(); }} />}
           />
         )
       }
@@ -241,7 +243,8 @@ function Search() {
         open
           // Keyed by entry: each one starts fresh (no related list or body from the previous entry).
           ? <Detail key={open.key} row={open} client={client} onOpen={openRow} onClose={back} takeFocus={narrow} />
-          : <Intro onPick={(s, sample) => { setSource(s); setQ(sample); inputRef.current?.focus(); }} />
+          // A sample is a fresh search in its source: no filters carried over that could hide it.
+          : <Intro onPick={(s, sample) => { setFilters({ ...EMPTY_FILTERS, source: s }); setQ(sample); inputRef.current?.focus(); }} />
       }
     />
   );

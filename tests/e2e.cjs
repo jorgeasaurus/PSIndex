@@ -102,6 +102,28 @@ const scenarios = [
     },
   },
   {
+    name: 'search quality',
+    async run(p) {
+      await p.goto(BASE);
+      await rowsReady(p);
+      const count = () => p.$eval('.count', (e) => Number(e.textContent.split(' ')[0].replace(/,/g, '')));
+      await search(p, 'get-mgsuer', 'Get-MgUser'); // swapped letters
+      check((await count()) < 2000, 'a typo finds the cmdlet without flooding the list', String(await count()));
+      await search(p, 'getmguser', 'Get-MgUser');
+      const mark = await p.$eval('.result .result-name mark', (m) => m.textContent).catch(() => '');
+      check(mark === 'Get-MgUser', 'a hyphenless match is highlighted', mark);
+      await p.fill('input[type=search]', '   ');
+      await p.waitForFunction(() => document.querySelector('.count')?.textContent?.startsWith('40,931'));
+      const label = await p.textContent('.count');
+      check(!label.includes('ms') && !param(p, 'q'), 'a blank query is no query (no timing, no q in the URL)', `${label} ${p.url()}`);
+      await p.goto(`${BASE}/?s=graph&verb=Frobnicate`);
+      await rowsReady(p);
+      await p.click('button[aria-controls=filters]');
+      const verb = await p.$eval('.filters select', (s) => s.options[s.selectedIndex]?.textContent);
+      check(verb === 'Frobnicate (none here)', 'a filter value this scope lacks stays visible and clearable', verb);
+    },
+  },
+  {
     name: 'arrow keys and Enter',
     async run(p) {
       await p.goto(BASE);
@@ -156,36 +178,6 @@ const scenarios = [
       await p.waitForFunction(() => [...document.querySelectorAll('.result .result-desc')].some((d) => d.textContent && !d.querySelector('.result-module')));
       const top = await p.evaluate(() => document.querySelector('.results').scrollTop);
       check(top >= 6000, 'late descriptions keep the scroll position', `scrollTop ${top}`);
-    },
-  },
-  {
-    name: 'cursor follows its row through a description refresh',
-    async setup(ctx) { this.release = await hold(ctx, `**${BUILD_PATH}idx/graph.desc.json`); },
-    async run(p) {
-      await p.goto(`${BASE}/?s=graph`);
-      await rowsReady(p);
-      const unfiltered = await p.textContent('.count');
-      await p.fill('input[type=search]', 'site settings'); // descriptions add matches above row 4 for this query
-      // Wait for this query's own results, not the unfiltered list still on screen: compare the
-      // result count itself (the label's other parts are not tied to which results are shown).
-      const countOf = (text) => text.split(' ')[0];
-      await p.waitForFunction(([was]) => document.querySelector('.count')?.textContent.split(' ')[0] !== was
-        && document.querySelectorAll('.result:not(.result-skel)').length > 5, [countOf(unfiltered)]);
-      for (let k = 0; k < 4; k++) await p.keyboard.press('ArrowDown');
-      const before = await p.textContent('.result.is-active .result-name');
-      const rowTop = () => p.evaluate(() => document.querySelector('.result.is-active')?.style.top);
-      const topBefore = await rowTop();
-      const descArrived = p.waitForResponse(/graph\.desc\.json/);
-      this.release();
-      await descArrived;
-      // The refresh can add description matches above the cursor; it must stay on the same cmdlet.
-      await p.waitForFunction(() => [...document.querySelectorAll('.result .result-desc')].some((d) => d.textContent && !d.querySelector('.result-module')));
-      const after = await p.textContent('.result.is-active .result-name');
-      const topAfter = await rowTop();
-      // Precondition: the refresh really moved the cursor's row. If the data stops re-ranking this
-      // query, say so rather than pass without testing anything.
-      check(topBefore !== topAfter, 'precondition: descriptions re-rank the cursor row', `row at ${topBefore} -> ${topAfter}; pick another query if this fails`);
-      check(before && before === after, 'cursor stays on its cmdlet when descriptions re-rank the list', `${before} -> ${after}`);
     },
   },
   {

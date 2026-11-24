@@ -164,13 +164,29 @@ function ResultRow({ i, row, query, active, open, onOpen, onHover }: { i: number
   );
 }
 
+/**
+ * Where a token occurs in a name, as [start, length]: literally, or else ignoring hyphens on both
+ * sides ("getmguser" in Get-MgUser), mapped back to the name's own characters.
+ */
+function locate(name: string, t: string): readonly [number, number] | null {
+  const lower = name.toLowerCase();
+  const at = lower.indexOf(t);
+  if (at >= 0) return [at, t.length];
+  const keep = [...lower].flatMap((c, i) => (c === '-' ? [] : [i])); // flat index -> name index
+  const flatT = t.replace(/-/g, '');
+  const fa = flatT ? keep.map((i) => lower[i]).join('').indexOf(flatT) : -1;
+  if (fa < 0) return null;
+  const start = keep[fa], end = keep[fa + flatT.length - 1] + 1;
+  return [start, end - start];
+}
+
 /** Highlight each query token in a name, tokenised the same way the worker matched it. */
 function Mark({ text, q }: { text: string; q: string }) {
-  const lower = text.toLowerCase();
+  // Overlapping tokens: at the same start, the longer one wins.
   const marks = queryTokens(q)
-    .map((t) => [lower.indexOf(t), t.length] as const)
-    .filter(([at]) => at >= 0)
-    .sort((a, b) => a[0] - b[0]);
+    .map((t) => locate(text, t))
+    .filter((m) => m !== null)
+    .sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   const out = [];
   let pos = 0;
   for (const [at, len] of marks) {

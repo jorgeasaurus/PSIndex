@@ -25,9 +25,12 @@ const FILTER_KEYS = Object.keys(CODECS) as (keyof Filters)[];
 
 function filtersFrom(p: URLSearchParams): Filters {
   const read = <K extends keyof Filters>(k: K) => CODECS[k].read(p.get(CODECS[k].param));
+  const source = read('source');
+  // Module and extra (API, site role) are facets of one source: across every source they don't apply.
+  const perSource = source !== ALL.id;
   return {
-    source: read('source'), verb: read('verb'), module: read('module'),
-    category: read('category'), extra: read('extra'), examples: read('examples'),
+    source, verb: read('verb'), module: perSource ? read('module') : '',
+    category: read('category'), extra: perSource ? read('extra') : '', examples: read('examples'),
   };
 }
 
@@ -46,7 +49,7 @@ export function readUrl(): UrlState {
 
 export function writeUrl({ q, filters, open }: UrlState) {
   const p = new URLSearchParams();
-  if (q) p.set(QUERY, q);
+  if (q.trim()) p.set(QUERY, q); // a blank query is no query
   const write = <K extends keyof Filters>(k: K) => {
     const v = CODECS[k].write(filters[k]);
     if (v !== null) p.set(CODECS[k].param, v);

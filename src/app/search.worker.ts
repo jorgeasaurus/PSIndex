@@ -79,25 +79,12 @@ index.then(async (all) => {
   post({ type: 'load-error', message: String(e?.message ?? e) });
 });
 
-function fuzzy(t: string, s: string): number {
-  // Subsequence match; rewards contiguous runs. Returns 0 when not a subsequence.
-  let si = 0, run = 0, score = 0;
-  for (let ti = 0; ti < t.length; ti++) {
-    const ch = t.charCodeAt(ti);
-    let found = false;
-    while (si < s.length) {
-      if (s.charCodeAt(si++) === ch) { found = true; break; }
-      run = 0;
-    }
-    if (!found) return 0;
-    run++;
-    score += run;
-  }
-  return score;
-}
-
-/** `t` is a lower-cased query token (see queryTokens). */
-function scoreToken(tt: string, L: Loaded, i: number): number {
+/**
+ * Literal match of one lower-cased query token (see queryTokens) against row i, best first:
+ * whole name, name prefix, noun prefix, anywhere in the name, the name without hyphens
+ * ("getmguser"), then the description. 0 when the token does not occur.
+ */
+function literalScore(tt: string, L: Loaded, i: number): number {
   const name = L.lname[i];
   if (name === tt) return 1000;
   if (name.startsWith(tt)) return 800 - Math.min(100, name.length - tt.length);
@@ -110,14 +97,51 @@ function scoreToken(tt: string, L: Loaded, i: number): number {
     const fa = L.lflat[i].indexOf(flatT);
     if (fa >= 0) return 480 - Math.min(120, fa);
   }
-  if (tt.length >= 4) {
-    // Typo tolerance: subsequence with long contiguous runs only.
-    const f = fuzzy(tt, name);
-    const perfect = (tt.length * (tt.length + 1)) / 2;
-    if (f >= perfect * 0.45) return 120 + Math.round((f / perfect) * 80) - Math.min(60, name.length - tt.length);
-  }
   if (L.ldesc?.[i].includes(tt)) return 60;
   return 0;
+}
+
+/** Edits a typo may contain: none below 5 letters, one up to 10, two beyond. */
+const typoBudget = (len: number) => (len < 5 ? 0 : len <= 10 ? 1 : 2);
+
+/**
+ * Fewest edits (insert, delete, substitute, swap neighbours) turning `t` into some prefix of `s`
+ * whose length is within `max` of t's, or max + 1 once it is certainly more. One table, so every
+ * prefix length is checked in a single pass.
+ */
+function prefixDistance(t: string, s: string, max: number): number {
+  const cols = Math.min(s.length, t.length + max);
+  let prev2: number[] = [];
+  let prev = Array.from({ length: cols + 1 }, (_, j) => j);
+  for (let i = 1; i <= t.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= cols; j++) {
+      let d = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (t[i - 1] === s[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && t[i - 1] === s[j - 2] && t[i - 2] === s[j - 1]) d = Math.min(d, prev2[j - 2] + 1);
+      cur.push(d);
+      if (d < rowMin) rowMin = d;
+    }
+    if (rowMin > max) return max + 1;
+    prev2 = prev;
+    prev = cur;
+  }
+  let best = max + 1;
+  for (let j = Math.max(0, t.length - max); j <= cols; j++) best = Math.min(best, prev[j]);
+  return best;
+}
+
+/**
+ * A misspelt token: within the typo budget of the start of the name, the noun, or the name
+ * without hyphens. Only used for a token that occurs literally nowhere in scope, so typo matches
+ * never crowd out real ones.
+ */
+function typoScore(tt: string, L: Loaded, i: number): number {
+  const max = typoBudget(tt.length);
+  if (!max) return 0;
+  let best = max + 1;
+  for (const s of [L.lname[i], L.lnoun[i], L.lflat[i]]) if (s) best = Math.min(best, prefixDistance(tt, s, max));
+  return best > max ? 0 : 300 - 100 * best - Math.min(60, L.lname[i].length - tt.length);
 }
 
 function passes(L: Loaded, i: number, f: Filters): boolean {
@@ -147,13 +171,15 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   const tokens = queryTokens(q);
   const { sources, perSourceFacets } = scopeOf(filters.source);
   const scope = all.filter((L) => sources.some((s) => s.id === L.id));
+  // A token with no literal match anywhere in scope (under the filters) is treated as a typo.
+  const misspelt = tokens.map((t) => !scope.some((L) => L.shard.n.some((_, i) => passes(L, i, filters) && literalScore(t, L, i) > 0)));
   const hits: { ref: number; score: number; len: number }[] = [];
   for (const L of scope) {
     for (let i = 0; i < L.shard.n.length; i++) {
       if (!passes(L, i, filters)) continue;
       let score = tokens.length ? 0 : 1; // no query: everything matches, in index order
-      for (const t of tokens) {
-        const s = scoreToken(t, L, i);
+      for (let k = 0; k < tokens.length; k++) {
+        const s = misspelt[k] ? typoScore(tokens[k], L, i) : literalScore(tokens[k], L, i);
         if (!s) { score = 0; break; }
         score += s;
       }
@@ -162,7 +188,7 @@ function runSearch(all: Loaded[], { id, q, filters }: Search) {
   }
   if (tokens.length) hits.sort((a, b) => b.score - a.score || a.len - b.len || a.ref - b.ref);
   const refs = Int32Array.from(hits, (h) => h.ref);
-  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0 }, [refs.buffer]);
+  post({ type: 'results', id, q, refs, facets: facetsFor(scope, perSourceFacets), ms: performance.now() - t0, described: scope.every((L) => L.ldesc) }, [refs.buffer]);
 }
 
 function rowOf(all: Loaded[], ref: number): Row {
