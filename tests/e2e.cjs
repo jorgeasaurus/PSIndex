@@ -900,7 +900,7 @@ const scenarios = [
   },
   {
     name: 'filter links and recovery',
-    async run(p) {
+    async run(p, ctx) {
       await p.goto(`${BASE}/?verb=get`);
       await rowsReady(p);
       check((await p.locator('.result:not(.result-skel)').count()) > 0, 'a facet value in another case matches');
@@ -908,9 +908,17 @@ const scenarios = [
       const shown = await p.$eval('.filters select', (s) => s.selectedOptions[0]?.textContent);
       check(shown === 'Get', 'the filter bar shows the facet in its own spelling', shown);
       // Matching in any case is no new search: an Enter pressed before the results still opens.
+      // Hold a shard so those results cannot arrive yet. Enter is handled by the search box, which
+      // is focused only once the session is live — `.app:not([aria-busy])` (attached) can match
+      // before that focus, and the key then does nothing.
+      const release = await hold(ctx, `**${BUILD_PATH}idx/graph.json`);
       await p.goto(`${BASE}/?q=get-mguser&verb=get`);
-      await p.waitForSelector('.app:not([aria-busy])', { state: 'attached' });
+      await p.waitForFunction(() => {
+        const input = document.querySelector('input[type=search]');
+        return !!input && !input.readOnly && document.activeElement === input;
+      });
       await p.keyboard.press('Enter');
+      release();
       await titleIs(p, 'Get-MgUser');
       await p.goto(`${BASE}/?s=az&ver=beta`);
       await rowsReady(p);
