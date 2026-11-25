@@ -43,7 +43,10 @@ export default defineConfig({
   // Vercel builds set VERCEL and need the function bundle. Local preview uses the Node
   // adapter because @astrojs/vercel does not implement `astro preview`.
   adapter: process.env.VERCEL
-    ? vercel({ includeFiles: artifactFiles() })
+    ? vercel({
+        includeFiles: artifactFiles(),
+        webAnalytics: { enabled: true },
+      })
     : node({ mode: 'standalone' }),
   integrations: [preact()],
   build: { client: clientDir, inlineStylesheets: 'auto' },
