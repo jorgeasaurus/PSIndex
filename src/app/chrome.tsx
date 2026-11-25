@@ -312,7 +312,7 @@ export function LoadFailed({ message }: { message: string }) {
 export function Intro({ onPick, compact }: { onPick?: (s: SourceId, q: string) => void; compact?: boolean }) {
   return (
     <div class={'intro' + (compact ? ' intro-compact' : '')}>
-      <h2>Look up any Microsoft PowerShell cmdlet.</h2>
+      <h2>Look up Graph, Az, Entra, Exchange, and MECM cmdlets.</h2>
       <p class="intro-lede">
         PSIndex searches {formatCount(TOTAL)} cmdlets from {SOURCE_NAMES} in one place, with each one’s
         syntax, parameters, examples and required permissions from the Microsoft docs. Type part of a name or what you want to

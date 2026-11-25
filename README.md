@@ -1,6 +1,6 @@
 # PSIndex
 
-One searchable reference for the PowerShell cmdlets an M365 / endpoint admin actually uses:
+One searchable reference for Microsoft Graph, Azure, Entra, Exchange/Teams/SharePoint, and Configuration Manager PowerShell cmdlets:
 
 | Source | Entries | Upstream docs |
 |---|---|---|

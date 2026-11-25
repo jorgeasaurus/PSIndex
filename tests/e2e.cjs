@@ -48,7 +48,7 @@ const scenarios = [
       await p.goto(BASE);
       await rowsReady(p);
       const h = await p.textContent('.intro-compact h2');
-      check(/PowerShell cmdlet/.test(h), 'a phone shows what PSIndex is above the results', h);
+      check(h === 'Look up Graph, Az, Entra, Exchange, and MECM cmdlets.', 'a phone shows what PSIndex is above the results', h);
       await p.fill('input[type=search]', 'mailbox');
       await p.waitForFunction(() => !document.querySelector('.intro-compact'));
       await p.fill('input[type=search]', '');
