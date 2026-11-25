@@ -105,7 +105,7 @@ export function McpPanel() {
           <button type="button" class="icon-btn" aria-label="Close" onClick={() => ref.current?.close()}><X size={18} /></button>
         </div>
         <div class="mcp-body">
-          <p id="mcp-lede">Search PSIndex cmdlets over MCP, with no authentication and read-only tools.</p>
+          <p id="mcp-lede">Search Graph, Az, Entra, Exchange, and MECM cmdlets over MCP, with no authentication and read-only tools.</p>
 
           <section class="mcp-block" aria-label="Endpoint">
             <h3>Endpoint</h3>

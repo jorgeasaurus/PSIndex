@@ -39,7 +39,7 @@ function createServer(origin: string) {
     name: 'psindex',
     version: '1.0.0',
   }, {
-    instructions: 'Search and read Microsoft 365 and Azure PowerShell cmdlets from PSIndex. Use search_cmdlets to find a name, then get_cmdlet for its syntax and parameters. Read-only.',
+    instructions: 'Search and read Graph, Az, Entra, Exchange, and MECM PowerShell cmdlets from PSIndex. Use search_cmdlets to find a name, then get_cmdlet for its syntax and parameters. Read-only.',
   });
   server.registerTool('search_cmdlets', {
     title: 'Search cmdlets',
