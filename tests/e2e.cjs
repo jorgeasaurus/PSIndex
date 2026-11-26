@@ -84,6 +84,8 @@ const scenarios = [
       // Parameters alone search nothing: the full list stays, with a note saying why.
       await p.fill('input[type=search]', '-All');
       await p.waitForSelector('.notice-link:has-text("aren’t searched")');
+      // The URL is written after the render that shows the notice.
+      await p.waitForFunction(() => !new URLSearchParams(location.search).has('q')).catch(() => {});
       check(!param(p, 'q'), 'a parameter-only query is no query in the URL', p.url());
       await p.fill('input[type=search]', 'Get-MgUser -All');
       await p.waitForFunction(() => !document.querySelector('.notice-link'));
