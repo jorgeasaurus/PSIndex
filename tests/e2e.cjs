@@ -1014,6 +1014,12 @@ const scenarios = [
       await p.waitForFunction(() => !document.querySelector('.app[data-open]'));
       await p.goForward();
       await p.waitForSelector('.app[data-open] .detail-title');
+      // Back before the forwarded entry is marked can leave the dialog open
+      // (seen in CI with history.state still null, not locally).
+      await p.waitForFunction(() => history.state?.psindexDialog === true).catch(async (e) => {
+        const at = await p.evaluate(() => ({ search: location.search, open: !!document.querySelector('.app[data-open]'), state: history.state, length: history.length }));
+        throw new Error(`${e.message.split('\n')[0]} after Forward reopened the entry: ${JSON.stringify(at)}`);
+      });
       check(param(p, 'c') === c, 'Forward after closing reopens the entry the URL names', p.url());
       await p.goBack();
       // On a timeout, say which history state the app was left in (seen once in CI, not locally).
