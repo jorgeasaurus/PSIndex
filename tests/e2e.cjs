@@ -1146,7 +1146,9 @@ const scenarios = [
     name: 'comment contrast in the light theme',
     context: { colorScheme: 'light' },
     async run(p) {
-      await p.goto(`${BASE}/?c=entra:Get-EntraUser`);
+      // Get-EntraUser's refreshed examples have no # comments; the stale
+      // committed ones only tokenised leftover ### headings as comments.
+      await p.goto(`${BASE}/?c=mecm:Disconnect-CMTrackedObject`);
       await p.waitForSelector('.detail .t-com');
       const ratio = await p.evaluate(() => {
         const lum = (s) => { const c = s.match(/\d+/g).slice(0, 3).map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
